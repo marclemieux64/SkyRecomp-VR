@@ -81,6 +81,11 @@ float vr_rig_units_per_metre(void);
 #define CC_AT_COUNT 0x5a08                  // u16; the attack list's pointers from +0x8 (at most 0x200)
 #define SWORD_ATTACK_START (MAIN_BASE + 0xa6d158)  // (Link, 0, direction; s0 60, s1 45: the game's slash)
 #define LINK_ATTACK_DIR 0x41e               // u16, the attack's direction bit (also each collider +0x0c; angle +0x0e)
+#define LINK_ACTION 0x468                   // u32: Link's action (an index into his action table, main+0x1638bd8)
+// The spin attack, horizontal or vertical: action 0x30 for ~52 updates (measured headset-free, the right stick flicked
+// side to side and up and down). While it plays the sword is the game's - its hits, its swing and where it is drawn
+// (vr_rig.c: vr_sword_spin) - and it is back in your hand when it ends.
+#define ACTION_SPIN 0x30
 // A swing of its own starts when the blade tip moves faster than VR Options > Swing Speed to Hit ([VR]
 // sword_swing_speed, m/s), measured from the controller's own motion in the room (vr_input.c: walking and turning
 // don't count), and ends after FREE_END_UPDATES updates below FREE_END of that.
@@ -96,6 +101,8 @@ static _Atomic bool g_spatial;  // (the sword out in 1st person: the Joy-Con's t
 bool vr_sword_spatial(void) { return atomic_load(&g_spatial); }
 static _Atomic bool g_out;  // the sword drawn in 1st person, in your hand (vr_rig.c: the view doesn't follow his slashes)
 bool vr_sword_out(void) { return atomic_load(&g_out); }
+static _Atomic bool g_spin;  // Link is in a spin attack (ACTION_SPIN): the sword is the game's
+bool vr_sword_spin(void) { return atomic_load(&g_spin); }
 static float g_shift[3];
 static bool g_shift_on;
 
@@ -189,6 +196,13 @@ static void free_swing_register(Cpu *c, uint64_t pl) {
 static void player_update_hook(Cpu *c) {
     const uint64_t pl = c->x[0];
     g_player_update(c);
+    const bool spin = *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION) == ACTION_SPIN;
+    if (spin != atomic_load(&g_spin)) {
+        atomic_store(&g_spin, spin);
+        static int log = -1;
+        if (log < 0) log = getenv("SKYRECOMP_SWORD_LOG") != NULL;
+        if (log) LOG("[sword] spin attack %s\n", spin ? "started: the sword is the game's" : "over: the sword in your hand again");
+    }
     // (only in play, not the title screen's Link the update also serves: his eye point is valid then. Compared with
     // the actor main+0x18299d0 points to, the hook never acted: in play the update is called with another pointer,
     // and that one read 0 at the time)
@@ -221,6 +235,7 @@ static void player_update_hook(Cpu *c) {
         ready_updates = on && live_eye && !vr_rig_settling() && !vr_game_paused() ? ready_updates + 1 : 0;
     }
     if (!on) { have_last = false; return; }
+    if (spin) { have_last = false; return; }  // (a spin attack: its hits, its swing and its trail the game's - ACTION_SPIN)
     // The blade as it is drawn: the sword model's +x from its hilt (vr_rig_held_world - the controller, the hand in it
     // and the game's own grip of the sword in that hand). That isn't the controller's -z: the hand sits turned in the
     // grip and the game holds the sword at its own angle in the hand, so a line along -z left the drawn blade a little
