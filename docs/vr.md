@@ -210,7 +210,15 @@ Picking it up is read from where the game puts it:
 - **Shield:** taken within 40 units. Readied, it sits 25 to 31 units from the hand the game draws here.
 - **Sheathed:** on his back, both are 50 or more units from either hand.
 - **The offset:** measured in a frame where both the item and its hand are drawn. When the item comes first, the
-  hand's draw measures it and the next frame uses it.
+  hand's draw measures it and the next frame uses it. One out of the hand's reach (25 / 40 units) is not taken: the
+  game's animation pulling the item away (sheathing, a scripted move) had it drawn 45-65 units off the controller.
+- **New models** (`held_learn`, kept in `vr_held_models.txt`): a rigid mesh is learned as a sword or shield only when
+  its offset in the hand's frame stays within 2 units for 20 frames while the hand moves 8 units about the eye point,
+  and only while that hand holds no known item. Learned from mere nearness, pieces of the sword and shield (11 by
+  2026-11-14) became items of their own and took the real one's place every other draw. A mesh being learned isn't
+  taken for a piece of Link meanwhile (a shield held in front of him sits where his belt's pieces are).
+- **Where the blade is** for its hits (`vr_rig_held_world`): the controller, the hand in it and the game's offset - the
+  sword model's +x from its hilt, 23-45 degrees off the controller's -z.
 
 **Which hand is which** comes from them too: the game draws the sword in his right hand and the shield in his left,
 whatever the controllers do. A held item drawn clearly nearest the other hand (both hands drawn, the other 1.5x as far)
@@ -329,8 +337,9 @@ from a slash's collider dumped update by update, its start (the callers of main+
 The white trail is drawn from the sword line's structure - a history of points further in (+0x90, +0x144..+0x168,
 +0x228) - while its u32 at +0x3bc is set (1 in a slash); it is cleared after each update (`SKYRECOMP_VR_SWORD_TRAIL=1`
 keeps it). Screenshots mid-slash: moving the line changed nothing, collapsing the history thinned the trail to a
-streak, clearing +0x3bc left none. While the sword is in your hand the view doesn't follow Link's animated head
-(`vr_sword_out`): his slashes lean it.
+streak, clearing +0x3bc left none. While the sword is in your hand the view follows Link's animated head only once it
+is 60-90 units from his eye point (`vr_sword_out`; otherwise 20-45): his slashes lean it less far, while a side hop or a
+backflip when targeting takes it further - switched off altogether, those left the view behind.
 
 ### The Beetle (`runtime/hle/vr_beetle.c`, `vr_rig.c`, `runtime/hle/player.c`)
 

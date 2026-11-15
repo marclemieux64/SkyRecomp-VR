@@ -46,6 +46,10 @@ bool game_camera_view(float view[12]);  // runtime/hle/player.c: the game camera
 // point, the eye is the head plus its usual offset from the eye point (measured while they stay together).
 #define LINK_HEAD_DETACH 45.0f
 #define LINK_HEAD_ATTACHED 20.0f
+// (the same with the sword drawn in 1st person: a slash leans his head less far than this; a side hop or a backflip
+// while targeting takes it further)
+#define LINK_HEAD_DETACH_SWORD 90.0f
+#define LINK_HEAD_ATTACHED_SWORD 60.0f
 #define LINK_EYE_PART_MAX_VERTS 96
 #define LINK_EYE_PART_RADIUS 12.0f
 #define LINK_BELT_RADIUS 18.0f
@@ -262,20 +266,25 @@ void vr_rig_begin_frame(void) {
     static bool theatre;
     float camera_distance = -1;
     bool have_eye = g_vr_config.view_mode == 1 && player_eye(pos);
-    {   // (scripted moves: the eye follows his animated head - LINK_HEAD_DETACH. Not while the sword is in your hand
-        // (hle/vr_sword.c): his slashes lean his head, and the view stayed put while yours swing)
+    {   // (scripted moves: the eye follows his animated head - LINK_HEAD_DETACH. With the sword in your hand
+        // (hle/vr_sword.c) only once it is much further: his slashes lean his head, and the view stayed put while yours
+        // swing - but switched off altogether, the view was left behind by the moves he makes while targeting (a side
+        // hop, a backflip: his body animated away while his eye point waits, as through a door))
         extern uint64_t renderer_present_count(void);
         extern bool vr_sword_out(void);
         g_scripted = false;
-        if (have_eye && g_head_frame && g_head_frame + 2 >= renderer_present_count() + 1 && !vr_sword_out()) {
+        const bool sword = vr_sword_out();
+        const float attached = sword ? LINK_HEAD_ATTACHED_SWORD : LINK_HEAD_ATTACHED;
+        const float detach = sword ? LINK_HEAD_DETACH_SWORD : LINK_HEAD_DETACH;
+        if (have_eye && g_head_frame && g_head_frame + 2 >= renderer_present_count() + 1) {
             const float dx = g_head_world[0] - pos[0], dz = g_head_world[2] - pos[2], d = sqrtf(dx * dx + dz * dz);
-            if (d < LINK_HEAD_ATTACHED) {
+            if (d < LINK_HEAD_ATTACHED) {  // (the head's usual offset: learnt only while they are together)
                 for (int i = 0; i < 3; i++)
                     g_head_offset[i] = g_head_offset_ok ? g_head_offset[i] + (pos[i] - g_head_world[i] - g_head_offset[i]) * 0.1f
                                                         : pos[i] - g_head_world[i];
                 g_head_offset_ok = true;
-            } else if (g_head_offset_ok) {  // (eased in between: no jump as the head moves off)
-                const float w = fminf(1.0f, (d - LINK_HEAD_ATTACHED) / (LINK_HEAD_DETACH - LINK_HEAD_ATTACHED));
+            } else if (d >= attached && g_head_offset_ok) {  // (eased in between: no jump as the head moves off)
+                const float w = fminf(1.0f, (d - attached) / (detach - attached));
                 g_scripted = w > 0.5f;
                 for (int i = 0; i < 3; i++) pos[i] += (g_head_world[i] + g_head_offset[i] - pos[i]) * w;
             }
@@ -964,7 +973,14 @@ static void held_measure(int k) {    // (the item and its hand drawn this frame:
     float hi[12];
     const int s = g_held[k].side;
     if (s < 0 || g_hand_game_frame[s] != g_held[k].frame || !a_inverse(g_hand_game[s], hi)) return;
-    a_mul(hi, g_held[k].block, g_held[k].rel);
+    float rel[12];
+    a_mul(hi, g_held[k].block, rel);
+    // (an offset out of the hand's reach isn't the item in it: the game's own animation taking it away - sheathing it,
+    // a scripted move - or another mesh in its place. The last good one is kept: taken, the item was drawn 45-65 units
+    // off the controller, at right angles to it.)
+    const float reach = k == 1 ? HELD_REACH_SHIELD : HELD_REACH;
+    if (rel[3] * rel[3] + rel[7] * rel[7] + rel[11] * rel[11] > reach * reach && g_held[k].rel_frame) return;
+    memcpy(g_held[k].rel, rel, sizeof rel);
     g_held[k].rel_frame = g_held[k].frame;
 }
 
@@ -1515,26 +1531,58 @@ void vr_rig_skinned_note(const float *slot0, uint64_t size0, const float *bones,
 }
 
 // (a rigid draw that is no known item or part) Learning a sword's or shield's model - HELD_LEARN_FRAMES, above.
+#define HELD_LEARN_RIGID 2.0f   // (units: its offset in the hand's frame kept this close)
+#define HELD_LEARN_MOVE 8.0f    // (units: the hand moved this far about his eye point meanwhile)
+static struct { uint64_t count, last; int side, frames; float t0[3], h0[3], moved; } g_learn[8];
 static void held_learn(const float *m, uint64_t count, uint64_t now) {
     static int on = -1;
     if (on < 0) on = getenv("SKYRECOMP_VR_HELD_LEARN") ? atoi(getenv("SKYRECOMP_VR_HELD_LEARN")) != 0 : 1;
-    if (!on || count < HELD_LEARN_MIN_COUNT) return;
-    static struct { uint64_t count, last; int side, frames; } cand[8];
+    if (!on || count < HELD_LEARN_MIN_COUNT || !g_rig.have_game_view) return;
+    float e[3];  // (his eye point, in the camera space the blocks are in)
+    {
+        const float *v = g_rig.game_view;
+        for (int r = 0; r < 3; r++) e[r] = v[r * 4] * g_rig.link[0] + v[r * 4 + 1] * g_rig.link[1] + v[r * 4 + 2] * g_rig.link[2] + v[r * 4 + 3];
+    }
     for (int s = 0; s < 2; s++) {
         if (!g_hand_game_frame[s] || g_hand_game_frame[s] + 1 < now) continue;
+        // (not while that hand holds a known item: then a mesh staying by it is a piece of that item - its hilt, its
+        // rim - and learned as an item of its own it took the item's place every other draw: the offset measured from
+        // the piece, the sword or shield drawn off the hand or left to the game. 11 such "shields" were learned by
+        // 2026-11-14, filling the list.)
+        const int hk = s == 1 ? 0 : 1;
+        if (g_held[hk].side == s && g_held[hk].frame && g_held[hk].frame + HELD_MEMORY >= now) continue;
         const float dx = m[3] - g_hand_game[s][3], dy = m[7] - g_hand_game[s][7], dz = m[11] - g_hand_game[s][11];
         const float reach = s == 1 ? HELD_REACH : HELD_REACH_SHIELD;  // (side 1: his right hand - the sword's)
         if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        // Held, it is rigid on the hand: its offset in the hand's frame (H^-1 M) stays put while the hand moves about
+        // him - a piece of his body or gear near the hand (his belt, his pouches) shifts in it as soon as the hand
+        // moves. So: that offset kept within HELD_LEARN_RIGID for the frames running, and the hand moved at least
+        // HELD_LEARN_MOVE relative to his eye point meanwhile.
+        float hi[12], rel[12];
+        if (!a_inverse(g_hand_game[s], hi)) continue;
+        a_mul(hi, m, rel);
+        const float t[3] = {rel[3], rel[7], rel[11]};
+        const float h[3] = {g_hand_game[s][3] - e[0], g_hand_game[s][7] - e[1], g_hand_game[s][11] - e[2]};
         int c = -1, oldest = 0;
         for (int i = 0; i < 8; i++) {
-            if (cand[i].count == count && cand[i].side == s) c = i;
-            if (cand[i].last < cand[oldest].last) oldest = i;
+            if (g_learn[i].count == count && g_learn[i].side == s) c = i;
+            if (g_learn[i].last < g_learn[oldest].last) oldest = i;
         }
-        if (c < 0) c = oldest, cand[c] = (__typeof__(cand[0])){count, 0, s, 0};
-        if (cand[c].last == now) return;  // (once a frame: the other eye, another pass)
-        cand[c].frames = cand[c].last + 1 == now ? cand[c].frames + 1 : 1;
-        cand[c].last = now;
-        if (cand[c].frames < HELD_LEARN_FRAMES) return;
+        if (c < 0) c = oldest, g_learn[c] = (__typeof__(g_learn[0])){count, 0, s, 0};
+        if (g_learn[c].last == now) return;  // (once a frame: the other eye, another pass)
+        const float rx = t[0] - g_learn[c].t0[0], ry = t[1] - g_learn[c].t0[1], rz = t[2] - g_learn[c].t0[2];
+        if (g_learn[c].last + 1 != now || rx * rx + ry * ry + rz * rz > HELD_LEARN_RIGID * HELD_LEARN_RIGID) {
+            g_learn[c].frames = 0, g_learn[c].moved = 0;  // (afresh from here)
+            memcpy(g_learn[c].t0, t, sizeof t), memcpy(g_learn[c].h0, h, sizeof h);
+        }
+        g_learn[c].frames++;
+        g_learn[c].last = now;
+        {
+            const float mx = h[0] - g_learn[c].h0[0], my = h[1] - g_learn[c].h0[1], mz = h[2] - g_learn[c].h0[2];
+            const float mv = sqrtf(mx * mx + my * my + mz * mz);
+            if (mv > g_learn[c].moved) g_learn[c].moved = mv;
+        }
+        if (g_learn[c].frames < HELD_LEARN_FRAMES || g_learn[c].moved < HELD_LEARN_MOVE) return;
         const int k = s == 1 ? 0 : 1;
         for (int i = 0; i < HELD_MODELS; i++)
             if (!g_held_counts[k][i]) {
@@ -1547,9 +1595,19 @@ static void held_learn(const float *m, uint64_t count, uint64_t now) {
                         (unsigned long long)count, s ? "right" : "left");
                 break;
             }
-        cand[c] = (__typeof__(cand[0])){0, 0, 0, 0};
+        g_learn[c] = (__typeof__(g_learn[0])){0, 0, 0, 0};
         return;
     }
+}
+
+// (vr_rig_is_link_draw) A mesh being learned as a sword or shield - rigid on a hand for a few frames running: not
+// taken for a piece of him meanwhile. (Held in front of him it sits on his centre line, where his belt's pieces are:
+// taken for one, it was hidden for good and never got as far as being learned.)
+extern uint64_t renderer_present_count(void);
+static bool held_learning(uint64_t count, uint64_t now) {
+    for (int i = 0; i < 8; i++)
+        if (g_learn[i].count == count && g_learn[i].last + 1 >= now && g_learn[i].frames >= 3) return true;
+    return false;
 }
 
 // (exec.c, a rigid draw that isn't a hand) The sword or shield in one of his hands: drawn with that hand, on its
@@ -1798,6 +1856,24 @@ static void hand_k(int side, float k[12]) {
     const float back = adj[3] * 0.01f * vr_rig_units_per_metre();
     for (int i = 0; i < 3; i++) k[i * 4 + 0] = r[i * 3 + 0], k[i * 4 + 1] = r[i * 3 + 1], k[i * 4 + 2] = r[i * 3 + 2];
     k[3] = 0, k[7] = 0, k[11] = back;
+}
+
+// (runtime/hle/vr_sword.c) Where a held item is drawn in the world - the sword (kind 0) or the shield (1): its
+// controller's grip C, the hand in it K and the item where the game has it in that hand (H^-1 M) - row-major 3x4, its
+// model's axes and origin. False while it isn't in a hand on a tracked controller (or wasn't drawn lately).
+bool vr_rig_held_world(int kind, float out[12]) {
+    extern uint64_t renderer_present_count(void);
+    if (kind < 0 || kind >= HELD_KINDS) return false;
+    const int side = g_held[kind].side;
+    const uint64_t now = renderer_present_count() + 1;
+    if (side < 0 || side > 1 || !g_held[kind].rel_frame || !g_held[kind].frame || g_held[kind].frame + 10 < now) return false;
+    float c[12], k[12], ck[12], rel[12];
+    memcpy(rel, g_held[kind].rel, sizeof rel);
+    if (!vr_rig_controller_pose(side, c)) return false;
+    hand_k(side, k);
+    a_mul(c, k, ck);
+    a_mul(ck, rel, out);
+    return true;
 }
 
 // ---- the rig's state for a reader outside the game (tools/skypeek.py rig: the exe exports its symbols, so this is
@@ -2064,7 +2140,7 @@ bool vr_rig_is_link_draw(const float *slot0, uint64_t size0, const float *bones,
         // (learnt from a wider place - his hips, back, pouches - but hidden there only once it moved with him)
         const float r2 = w[0] * w[0] + w[2] * w[2];
         const bool body = r2 < LINK_PIECE_BODY_RADIUS * LINK_PIECE_BODY_RADIUS && w[1] < -5.0f && w[1] > -140.0f;
-        if (eyes || belt || body) link_piece_seen(hash, count, vb_size, w);
+        if ((eyes || belt || body) && !held_learning(count, renderer_present_count() + 1)) link_piece_seen(hash, count, vb_size, w);
         if (!eyes && !belt && !body &&dx * dx + dy * dy + dz * dz < 70.0f * 70.0f) {  // (log: rigid meshes at him left shown - once each)
             static uint64_t said[64];
             static int ns;
