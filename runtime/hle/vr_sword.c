@@ -221,10 +221,38 @@ static void player_update_hook(Cpu *c) {
         ready_updates = on && live_eye && !vr_rig_settling() && !vr_game_paused() ? ready_updates + 1 : 0;
     }
     if (!on) { have_last = false; return; }
-    float blade[6];  // tip, base: along the grip's -z
+    // The blade as it is drawn: the sword model's +x from its hilt (vr_rig_held_world - the controller, the hand in it
+    // and the game's own grip of the sword in that hand). That isn't the controller's -z: the hand sits turned in the
+    // grip and the game holds the sword at its own angle in the hand, so a line along -z left the drawn blade a little
+    // past the hilt - only the tip's end of the swing met what the blade visibly cut through. (The controller's -z only
+    // while the drawn sword's pose isn't known.)
+    float origin[3], axis[3];
+    {
+        float held[12];
+        float n = 0;
+        if (vr_rig_held_world(0, held)) {
+            for (int i = 0; i < 3; i++) origin[i] = held[i * 4 + 3], axis[i] = held[i * 4], n += axis[i] * axis[i];
+            n = sqrtf(n);
+        }
+        const bool drawn_pose = n > 1e-4f;
+        if (drawn_pose) for (int i = 0; i < 3; i++) axis[i] /= n;
+        else for (int i = 0; i < 3; i++) origin[i] = grip[i * 4 + 3], axis[i] = -grip[i * 4 + 2];
+        static int log = -1;
+        static uint64_t logged;
+        if (log < 0) log = getenv("SKYRECOMP_SWORD_LOG") != NULL;
+        if (log && renderer_present_count() >= logged + 120) {
+            logged = renderer_present_count();
+            const float dot = -(axis[0] * grip[2] + axis[1] * grip[6] + axis[2] * grip[10]);
+            const float ox = origin[0] - grip[3], oy = origin[1] - grip[7], oz = origin[2] - grip[11];
+            LOG("[sword] blade from the %s: %.0f degrees from the controller's -z, hilt %.1f units from the grip\n",
+                drawn_pose ? "drawn sword" : "controller (no drawn pose)", acosf(fmaxf(-1.0f, fminf(1.0f, dot))) * 57.29578f,
+                sqrtf(ox * ox + oy * oy + oz * oz));
+        }
+    }
+    float blade[6];  // tip, base: along the blade
     for (int i = 0; i < 3; i++) {
-        blade[i] = grip[i * 4 + 3] - grip[i * 4 + 2] * TIP_AT;
-        blade[3 + i] = grip[i * 4 + 3] - grip[i * 4 + 2] * BASE_AT;
+        blade[i] = origin[i] + axis[i] * TIP_AT;
+        blade[3 + i] = origin[i] + axis[i] * BASE_AT;
     }
     if (!have_last) memcpy(last, blade, sizeof last);
     float game_tip[3];  // (the game's own tip, for the log: how far the blade in your hand is from it)
@@ -245,7 +273,7 @@ static void player_update_hook(Cpu *c) {
         const float g = sqrtf(gx * gx + gy * gy + gz * gz);  // (the game's own, while it slashes)
         if (g > 60.0f && g < 250.0f) reach = g;
         float end[3];
-        for (int i = 0; i < 3; i++) end[i] = blade[3 + i] - grip[i * 4 + 2] * reach;
+        for (int i = 0; i < 3; i++) end[i] = blade[3 + i] + axis[i] * reach;
         if (!have_last) memcpy(last_end, end, sizeof end);
         memcpy(cap[0], blade + 3, 3 * sizeof(float)), memcpy(cap[0] + 3, end, sizeof end);
         memcpy(cap[1], last_end, sizeof end), memcpy(cap[1] + 3, end, sizeof end);

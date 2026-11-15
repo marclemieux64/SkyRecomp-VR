@@ -52,6 +52,9 @@ bool vr_rig_hand_blocks(float orig[12], float repl[12]);  // (exec.c) this hand 
 // A controller's grip pose in the game world (row-major 3x4: x right, y up, -z forward; game units), as of the last
 // eye camera drawn with the real game camera (within 3 frames). side: 0 left, 1 right. Any thread.
 bool vr_rig_controller_pose(int side, float c[12]);
+// Where a held item is drawn in the game world (row-major 3x4, its model's axes and origin): kind 0 the sword, 1 the
+// shield. False while it isn't in a hand on a tracked controller.
+bool vr_rig_held_world(int kind, float out[12]);
 // Once per stereo frame: both eyes (pose, fov) -> the field of view the game culls with (vr_rig_cull_fov).
 void vr_rig_update_cull(const float reference[7], const float eye0[7], const float fov0[4], const float eye1[7],
                         const float fov1[4]);
