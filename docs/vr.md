@@ -337,7 +337,14 @@ from a slash's collider dumped update by update, its start (the callers of main+
 The white trail is drawn from the sword line's structure - a history of points further in (+0x90, +0x144..+0x168,
 +0x228) - while its u32 at +0x3bc is set (1 in a slash); it is cleared after each update (`SKYRECOMP_VR_SWORD_TRAIL=1`
 keeps it). Screenshots mid-slash: moving the line changed nothing, collapsing the history thinned the trail to a
-streak, clearing +0x3bc left none. While the sword is in your hand the view follows Link's animated head only once it
+streak, clearing +0x3bc left none.
+
+A spin attack (Link's action, +0x468, is 0x30 - horizontal and vertical alike, ~52 updates; measured headset-free,
+the right stick flicked side to side and up and down) is left to the game: the hook writes neither the line nor the
+colliders and starts no swings of its own, and `vr_rig.c` draws the sword (and the parts on its joint) where the game
+has it rather than in your hand (`vr_sword_spin`), not hidden near his head either. Back in your hand when it ends.
+
+While the sword is in your hand the view follows Link's animated head only once it
 is 60-90 units from his eye point (`vr_sword_out`; otherwise 20-45): his slashes lean it less far, while a side hop or a
 backflip when targeting takes it further - switched off altogether, those left the view behind.
 

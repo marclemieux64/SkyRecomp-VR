@@ -958,6 +958,10 @@ static struct {
     float rel[12];                   // H^-1 M: the item relative to that hand, and the frame it was measured
     uint64_t rel_frame;
 } g_held[HELD_KINDS];
+// (runtime/hle/vr_sword.c) Link is in a spin attack: the sword is drawn where the game swings it, not in your hand -
+// until it ends. g_spin_release: this draw was the sword left to the game for it.
+static bool sword_spinning(void) { extern bool vr_sword_spin(void); return vr_sword_spin(); }
+static bool g_spin_release;
 static bool g_held_on;               // (the draw being recorded is a held item: g_hand_draw its hand, g_held_k H^-1 M)
 static float g_held_k[12];
 
@@ -1674,6 +1678,7 @@ static bool held_draw(const float *slot0, uint64_t size0, uint64_t count) {
             dx * dx + dy * dy + dz * dz > HELD_PART_NEAR * HELD_PART_NEAR)
             return false;
         if (atomic_load(&g_door_grab) == side || atomic_load(&g_door_hover[side]) != 0.0f) return false;
+        if (k == 0 && sword_spinning()) { g_spin_release = true; return false; }
         g_hand_draw = side, g_hand_blocks = false, g_door_blocks = false, g_held_on = true;
         memcpy(g_held_k, g_held[k].rel, sizeof g_held_k);
         return true;
@@ -1776,6 +1781,7 @@ static bool held_draw(const float *slot0, uint64_t size0, uint64_t count) {
         a_mul(ii, m, part);
         a_mul(g_held[k].rel, part, rel);
     }
+    if (k == 0 && sword_spinning()) { g_spin_release = true; return false; }  // (a spin attack: where the game swings it)
     g_hand_draw = side, g_hand_blocks = false, g_door_blocks = false, g_held_on = true;
     memcpy(g_held_k, rel, sizeof g_held_k);
     {   // (diagnostics: SKYRECOMP_VR_HAND_LOG=1)
@@ -1804,7 +1810,9 @@ static uint64_t g_held_back[HELD_KINDS];  // (the frame each item was last seen 
 bool vr_rig_held_hidden(void) { return g_held_hide; }
 bool vr_rig_held_draw(const float *slot0, uint64_t size0, uint64_t count) {
     g_held_hide = false;
+    g_spin_release = false;
     if (held_draw(slot0, size0, count)) return true;
+    if (g_spin_release) return false;  // (the sword mid-spin, near his head: drawn where the game has it, not hidden)
     static int show = -1;
     if (show < 0) show = getenv("SKYRECOMP_VR_SHOW_BACK") != NULL;
     if (show || g_rig.mode != 1 || !slot0 || !hands_on() || !g_rig.have_game_view || !sky_vr_is_scene_projection(slot0, size0)) return false;
