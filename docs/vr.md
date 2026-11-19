@@ -234,8 +234,11 @@ with `SKYRECOMP_VR_HAND_LOG=1`:
   within 70 units (`HELD_KEEP`).
 - **The game draws no hand:** mid-swing, the swinging arm is part of his body, which is hidden in first person.
 - **The hand is drawn far away:** raising or bashing with the shield draws his left hand 80 to 160 units from it.
-- **Letting go:** only within 30 units of his eye point with no hand drawn, or 45 with the hand drawn far. The
-  sheathed hilt sits 21 to 24 units from it.
+- **Letting go:** by the game's own state (`vr_sword_sheathed`, `vr_shield_raised` in `vr_sword.c`): the sword
+  only while the game has it drawn, the shield only while the sword is drawn or it is raised (action `0x49`).
+  Otherwise both are on his back and let go at once (`held_allowed`, logged `[held-log] ... let go`). By distance
+  alone (within 30 units of his eye point, 45 with the hand drawn far) a shield on his back could sit further out and
+  stay on the controller at its last offset. That rule is kept only while the game's state isn't known (loading).
 - **Gaps:** the holding hand is remembered for 60 frames in which the item isn't drawn.
 - **A controller dropping out:** its last good pose is kept for 60 frames.
 

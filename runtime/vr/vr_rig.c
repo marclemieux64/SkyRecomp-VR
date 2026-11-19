@@ -971,6 +971,16 @@ static struct {
 // (runtime/hle/vr_sword.c) Link is in a spin attack: the sword is drawn where the game swings it, not in your hand -
 // until it ends. g_spin_release: this draw was the sword left to the game for it.
 static bool sword_spinning(void) { extern bool vr_sword_spin(void); return vr_sword_spin(); }
+// May his hand hold this item now, as the game has it (runtime/hle/vr_sword.c)? The sword only while it is drawn, the
+// shield only while the sword is drawn or the shield raised; otherwise both are on his back. Distances alone (HELD_BACK,
+// HELD_BACK_FAR) didn't always tell: a shield put away could stay on the controller, drawn at the last offset kept -
+// behind the hand - and either could show while sheathed. Not known (loading): left to the distances.
+static bool held_allowed(int k) {
+    extern int vr_sword_sheathed(void);
+    extern bool vr_shield_raised(void);
+    const int sheathed = vr_sword_sheathed();
+    return sheathed != 1 || (k == 1 && vr_shield_raised());
+}
 static bool g_spin_release;
 static bool g_held_on;               // (the draw being recorded is a held item: g_hand_draw its hand, g_held_k H^-1 M)
 static float g_held_k[12];
@@ -1771,6 +1781,15 @@ static bool held_draw(const float *slot0, uint64_t size0, uint64_t count) {
         if (side != g_held[k].side) g_held[k].rel_frame = 0;  // (another hand: its offset measured afresh)
         g_held[k].side = side;
         held_measure(k);
+    }
+    if (!held_allowed(k)) {  // (the game has it on his back: let go, whatever the distances say)
+        static int log = -1;
+        if (log < 0) log = getenv("SKYRECOMP_VR_HAND_LOG") != NULL;
+        if (log && g_held[k].side >= 0)
+            fprintf(stderr, "[held-log] frame %llu kind %d let go: %s\n", (unsigned long long)now, k,
+                    k ? "the sword sheathed and the shield not raised" : "the sword sheathed");
+        g_held[k].side = -1, g_held[k].rel_frame = 0;
+        return false;
     }
     const int side = g_held[k].side;
     // (the offset: measured whenever the item and its hand are drawn in one frame; kept while its hand isn't drawn -

@@ -86,6 +86,7 @@ float vr_rig_units_per_metre(void);
 // side to side and up and down). While it plays the sword is the game's - its hits, its swing and where it is drawn
 // (vr_rig.c: vr_sword_spin) - and it is back in your hand when it ends.
 #define ACTION_SPIN 0x30
+#define ACTION_SHIELD_UP 0x49  // (the shield raised: a flick of the Joy-Con (L), a bash - with the sword sheathed too)
 // A swing of its own starts when the blade tip moves faster than VR Options > Swing Speed to Hit ([VR]
 // sword_swing_speed, m/s), measured from the controller's own motion in the room (vr_input.c: walking and turning
 // don't count), and ends after FREE_END_UPDATES updates below FREE_END of that.
@@ -103,6 +104,13 @@ static _Atomic bool g_out;  // the sword drawn in 1st person, in your hand (vr_r
 bool vr_sword_out(void) { return atomic_load(&g_out); }
 static _Atomic bool g_spin;  // Link is in a spin attack (ACTION_SPIN): the sword is the game's
 bool vr_sword_spin(void) { return atomic_load(&g_spin); }
+// (vr_rig.c: what his hands hold, from the game itself) The sword sheathed - the game's own sword line at his back
+// (sword_drawn) - 1, drawn 0, not known -1 (no eye point: loading, the title). And the shield raised (his action
+// ACTION_SHIELD_UP): he holds the shield only then or with the sword drawn - otherwise it is on his back.
+static _Atomic int g_sheathed = -1;
+int vr_sword_sheathed(void) { return atomic_load(&g_sheathed); }
+static _Atomic bool g_shield_raised;
+bool vr_shield_raised(void) { return atomic_load(&g_shield_raised); }
 static float g_shift[3];
 static bool g_shift_on;
 
@@ -223,7 +231,7 @@ static void player_update_hook(Cpu *c) {
     extern bool player_eye(float eye[3]), vr_player_eye_cached(float eye[3]);
     float eye[3];
     const bool live_eye = player_eye(eye);
-    if (!live_eye && !vr_player_eye_cached(eye)) return;
+    if (!live_eye && !vr_player_eye_cached(eye)) { atomic_store(&g_sheathed, -1); return; }
     static int said;
     if (!said++) LOG("[sword] Link's update in play (called with %llx)\n", (unsigned long long)pl);
     float *line = (float *)(uintptr_t)(pl + SWORD_LINE);  // tip, base, last tip, last base
@@ -237,7 +245,10 @@ static void player_update_hook(Cpu *c) {
     static float last[6], last_end[3];
     static bool have_last;
     float grip[12];
-    const bool on = g_vr_config.sword_hitbox && g_vr_config.view_mode == 1 && vr_running() && sword_drawn(line, eye) &&
+    const bool drawn = sword_drawn(line, eye);
+    atomic_store(&g_sheathed, drawn ? 0 : 1);
+    atomic_store(&g_shield_raised, *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION) == ACTION_SHIELD_UP);
+    const bool on = g_vr_config.sword_hitbox && g_vr_config.view_mode == 1 && vr_running() && drawn &&
                     vr_rig_controller_pose(1, grip);
     atomic_store(&g_spatial, on && g_vr_config.sword_swing_hits);
     atomic_store(&g_out, on);
