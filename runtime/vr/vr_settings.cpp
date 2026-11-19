@@ -79,6 +79,8 @@ void validate(VRConfig &config) {
     config.smooth_turn_speed = std::clamp(config.smooth_turn_speed, 30.0f, 360.0f);
     if (!std::isfinite(config.sword_swing_speed)) config.sword_swing_speed = kDefaults.sword_swing_speed;
     config.sword_swing_speed = std::clamp(config.sword_swing_speed, 1.0f, 10.0f);
+    if (!std::isfinite(config.sword_dir_leeway)) config.sword_dir_leeway = kDefaults.sword_dir_leeway;
+    config.sword_dir_leeway = std::clamp(config.sword_dir_leeway, 0.0f, 22.5f);
 }
 
 bool is_section(const std::string &line, const char *name) {
@@ -94,8 +96,9 @@ bool any_section(const std::string &line) {
 
 std::vector<std::string> vr_lines() {
     std::ostringstream resolution, resolution_min, world, height, distance, hud_distance, hud_scale, hud_offset,
-        wrist_size, wrist_side, wrist_up, wrist_forward, wrist_tilt, wrist_background, menu_distance, menu_width, menu_height, swing_speed;
+        wrist_size, wrist_side, wrist_up, wrist_forward, wrist_tilt, wrist_background, menu_distance, menu_width, menu_height, swing_speed, dir_leeway;
     swing_speed << std::fixed << std::setprecision(1) << g_vr_config.sword_swing_speed;
+    dir_leeway << std::fixed << std::setprecision(1) << g_vr_config.sword_dir_leeway;
     menu_distance << std::fixed << std::setprecision(2) << g_vr_hud_config.menu_distance;
     menu_width << std::fixed << std::setprecision(2) << g_vr_hud_config.menu_width;
     menu_height << std::fixed << std::setprecision(2) << g_vr_hud_config.menu_height;
@@ -126,6 +129,7 @@ std::vector<std::string> vr_lines() {
             std::string("sword_swing_hits = ") + (g_vr_config.sword_swing_hits ? "true" : "false"),
             std::string("sword_free_swings = ") + (g_vr_config.sword_free_swings ? "true" : "false"),
             "sword_swing_speed = " + swing_speed.str(),
+            "sword_dir_leeway = " + dir_leeway.str(),
             "snap_turn_angle = " + std::to_string((int)g_vr_config.snap_turn_angle),
             "smooth_turn_speed = " + std::to_string((int)g_vr_config.smooth_turn_speed),
             "camera_height_offset = " + height.str(), "camera_distance_offset = " + distance.str(),
@@ -182,6 +186,7 @@ extern "C" void LoadVRConfig(const char *filepath) {
         else if (key == "sword_swing_hits") parse_bool(value, g_vr_config.sword_swing_hits);
         else if (key == "sword_free_swings") parse_bool(value, g_vr_config.sword_free_swings);
         else if (key == "sword_swing_speed") parse_float(value, g_vr_config.sword_swing_speed);
+        else if (key == "sword_dir_leeway") parse_float(value, g_vr_config.sword_dir_leeway);
         else if (key == "snap_turn_angle") parse_float(value, g_vr_config.snap_turn_angle);
         else if (key == "smooth_turn_speed") parse_float(value, g_vr_config.smooth_turn_speed);
         else if (key == "camera_height_offset") parse_float(value, g_vr_config.camera_height_offset);

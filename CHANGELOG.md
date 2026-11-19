@@ -11,12 +11,13 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **Spin attacks are the game's:** during a spin attack (horizontal or vertical) the sword is drawn where the game swings it and hits with the game's own spin, then goes back in your hand when it ends.
 - **Targeting:** with the sword out, the view follows Link's head again once it is far from his eye point (a side hop or backflip while targeting no longer leaves the view behind); a slash's lean still doesn't move it.
 - **Swings hit on their own:** a fast swing of the blade (its tip faster than VR Options > Swing Speed to Hit, 3 m/s by default, measured from your hand's own motion - walking and turning don't count) hits by itself, without waiting for the game to recognise a slash or finish the last one; the game's own slashes still play, with their sounds.
-- **Your swing's direction:** enemies that guard by direction see the direction you swung the blade, in your swings and the game's own slashes.
+- **Your swing's direction:** enemies that guard by direction see the direction you swung the blade, in your swings and the game's own slashes - with your swing's real angle, not the nearest of the eight.
+- **Slash Direction Leeway:** a slash near the line between two of the game's eight directions (VR Options > Slash Direction Leeway, 10 degrees by default) counts as any direction, so puzzles that want an exact one - the Sparring Hall's training logs - no longer need a stick's precision. It may also get past an enemy guarding by direction.
 - **No slash trail, a steady view:** the game's white swoosh trail is hidden while the sword is in your hand, and the view no longer follows Link's head as he leans into a slash.
 - **Right stick up / down is the D-pad's up / down.**
 - **Aiming with the controller:** aimed items go where the right controller points.
 - **Slingshot:** a new Slingshot system shoots from the controller along where it points, following the game's own seed flight, with a 3D marker where the seed will land; the Slingshot model is held in the hand.
-- **Link's body hidden:** his small pieces (eyes, belt, pouches) and his hair stay hidden when his body leaves the eye point (rolls, swings, climbing, swimming, doors). Enemies that come close are no longer mistaken for Link and hidden.
+- **Link's body hidden:** his small pieces (eyes, belt, pouches) and his hair stay hidden when his body leaves the eye point (rolls, swings, climbing, swimming, doors). Enemies that come close are no longer mistaken for Link and hidden; his own meshes, his hair included, are no longer forgotten when he is drawn away from an eye point not yet moved (a load, a warp).
 - **Beetle:** it launches from the right controller along where it points; the Beetle and its bracelet sit on your wrist; while it flies, the view switches to the game's own camera following it, and returns to 1st person when it's caught.
 - **Boss-key puzzle:** while you examine a boss door's lock and turn the key, the view switches to the game's own close-up of the key and the lock, and returns to 1st person when you back out or the door opens.
 

@@ -120,9 +120,13 @@ static bool sword_drawn(const float *line, const float *e) {
     return drawn;
 }
 
-// The tip's path (world) across the view: the game's direction bit and angle; false while it barely crosses the view
-// (a thrust, or too short to tell).
-static bool swing_direction(const float d[3], uint16_t *bit, uint16_t *angle) {
+// The tip's path (world) across the view: the game's direction bit (the nearest of its eight) and angle - the path's
+// own, not the direction's: what checks a slash's line takes it within a window around its own line (a training log,
+// dAcOsliceLog_c, cut only with the one direction it wants and an angle within about +-28 degrees of its line - measured
+// headset-free on the Sparring Hall's log: 0xc800..0xe800 cut, 0xc000 and 0xec00 bounced). Sent as the direction's own
+// angle, a diagonal swung a little flat was a horizontal one's and bounced. *edge: how near the path is to the boundary
+// between two of the eight (degrees, 0..22.5). False while it barely crosses the view (a thrust, or too short to tell).
+static bool swing_direction(const float d[3], uint16_t *bit, uint16_t *angle, float *edge) {
     float view[12], t[4];
     if (!vr_rig_cull_view(view, t)) return false;
     float r = 0, u = 0, nr = 0, nu = 0;
@@ -131,17 +135,25 @@ static bool swing_direction(const float d[3], uint16_t *bit, uint16_t *angle) {
     r /= sqrtf(nr), u /= sqrtf(nu);
     const float across = sqrtf(r * r + u * u), len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (across < 0.5f * len || across < 4.0f) return false;
-    const int k = ((int)lroundf(atan2f(-r, u) / (float)(M_PI / 4)) % 8 + 8) % 8;  // (0 up, counter-clockwise)
+    const float theta = atan2f(-r, u);  // (0 up, counter-clockwise)
+    const int k = ((int)lroundf(theta / (float)(M_PI / 4)) % 8 + 8) % 8;
     *bit = (uint16_t)(1u << ((k + 4) & 7));
-    *angle = (uint16_t)(k * 0x2000);
+    *angle = (uint16_t)((uint32_t)(int32_t)lroundf(theta * (float)(65536.0 / (2.0 * M_PI))) & 0xffffu);
+    const float off = fabsf(theta - (float)lroundf(theta / (float)(M_PI / 4)) * (float)(M_PI / 4));  // (from its centre)
+    *edge = 22.5f - off * (float)(180.0 / M_PI);
     return true;
 }
 
-static void set_direction(uint64_t pl, uint16_t bit, uint16_t angle) {
+// The direction a hit carries (each collider's +0x0c; Link +0x41e for his own animation stays the nearest one). With
+// `loose` the colliders carry none: a slash between two of the eight (VR Options > Slash Direction Leeway) counts for
+// whatever direction is checked - a puzzle wanting one (a training log; measured headset-free: the Sparring Hall's log,
+// which bounced every direction but up-right, cut with the colliders' direction 0 at any angle, Link's own kept),
+// an enemy guarding against one. A VR swing can't be held to the eighth of a circle a stick flick can.
+static void set_direction(uint64_t pl, uint16_t bit, uint16_t angle, bool loose) {
     *(uint16_t *)(uintptr_t)(pl + LINK_ATTACK_DIR) = bit;
     for (int k = 0; k < 3; k++) {
         uint8_t *col = (uint8_t *)(uintptr_t)(pl + SWORD_COLLIDER + SWORD_COLLIDER_STRIDE * k);
-        *(uint16_t *)(col + 0x0c) = bit;
+        *(uint16_t *)(col + 0x0c) = loose ? 0 : bit;
         *(uint16_t *)(col + 0x0e) = angle;
     }
 }
@@ -325,12 +337,14 @@ static void player_update_hook(Cpu *c) {
         for (int i = 0; i < 3; i++) path[0][i] = blade[i] - eye[i];  // (from his eye point: walking doesn't count)
         if (have_path <= DIR_HISTORY) have_path++;
         uint16_t bit = 0, angle = 0;
+        float edge = 22.5f;
         bool dir = false;
         if (have_path > DIR_HISTORY) {
             const float d[3] = {path[0][0] - path[DIR_HISTORY][0], path[0][1] - path[DIR_HISTORY][1],
                                 path[0][2] - path[DIR_HISTORY][2]};
-            dir = swing_direction(d, &bit, &angle);
+            dir = swing_direction(d, &bit, &angle, &edge);
         }
+        const bool loose = edge < g_vr_config.sword_dir_leeway;  // (between two of the eight: set_direction)
         static bool swinging;
         static int slow;
         static uint64_t swings, logged_swings;
@@ -347,14 +361,15 @@ static void player_update_hook(Cpu *c) {
             slow = hand < end ? slow + 1 : 0;
             if (slow >= FREE_END_UPDATES) swinging = false;
         }
-        if ((swinging || game) && dir && measured && hand > end && ready_updates >= FREE_READY_UPDATES) set_direction(pl, bit, angle);  // (the game's own too)
+        if ((swinging || game) && dir && measured && hand > end && ready_updates >= FREE_READY_UPDATES) set_direction(pl, bit, angle, loose);  // (the game's own too)
         if (swinging && !game) free_swing_register(c, pl);
         static int log = -1;
         if (log < 0) log = getenv("SKYRECOMP_SWORD_LOG") != NULL;
         if (log && swings != logged_swings && dir) {
             logged_swings = swings;
-            LOG("[sword] a swing of its own (%llu): %.1f m/s, direction %#x (angle %#06x)%s\n", (unsigned long long)swings,
-                hand, bit, angle, game ? "; the game slashing too" : "");
+            LOG("[sword] a swing of its own (%llu): %.1f m/s, direction %#x (angle %#06x, %.0f degrees from the next)%s%s\n",
+                (unsigned long long)swings, hand, bit, angle, edge, loose ? ", sent as any direction" : "",
+                game ? "; the game slashing too" : "");
         }
     }
     memcpy(last, blade, sizeof last);

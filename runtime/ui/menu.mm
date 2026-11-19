@@ -924,6 +924,11 @@ static void tab_vr_options(void) {
         changed |= opt_slider("Swing Speed to Hit", &g_vr_config.sword_swing_speed, 1.0f, 10.0f, 0.5f, 3.0f, "%.1f m/s",
                               "How fast the sword's tip must move (your hand's own motion, not walking or turning) "
                               "before a swing hits. Raise it if moving the sword around hits things by accident.");
+    changed |= opt_slider("Slash Direction Leeway", &g_vr_config.sword_dir_leeway, 0.0f, 22.5f, 2.5f, 10.0f, "%.1f deg",
+                          "1st person: the game sorts every slash into one of eight directions, and some puzzles (the "
+                          "training logs) want an exact one. A slash this close to the line between two directions counts "
+                          "as any direction (it may also get past an enemy guarding by direction). 0: always the nearest "
+                          "one; 22.5: every slash counts as any direction.");
     static const char *turn_modes[] = {"Snap", "Smooth", "Off"};
     changed |= opt_choice("Turning", &g_vr_config.turn_mode, turn_modes, 3, 0,
                           "1st person: the right stick turns you. Snap turns in steps (comfortable for most people), "

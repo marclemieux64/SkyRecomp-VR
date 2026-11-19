@@ -98,6 +98,11 @@ typedef struct VRConfig {
         = 3.0f
 #endif
         ;                                // ... once the blade tip moves faster than this (m/s)
+    float sword_dir_leeway
+#ifdef __cplusplus
+        = 10.0f
+#endif
+        ;                                // 1st person: a slash this near (degrees) a boundary between two directions counts for any
 } VRConfig;
 
 // Always contains a validated configuration. LoadVRConfig resets it to defaults first.
