@@ -645,7 +645,7 @@ bool vr_rig_eye_camera_direct(const float mono[28], const float reference[7], co
     return eye_camera(mono, reference, eye, fov, out, true);
 }
 
-typedef struct { uint64_t hash, count, size; } LinkMesh;
+typedef struct { uint64_t hash, count, size, far_last; int far_frames; } LinkMesh;  // (far_*: forget_link_mesh)
 static LinkMesh g_link_mesh[LINK_MESH_CACHE];
 
 // A cheap stable identity for immutable vertex data. Addresses alone may be recycled after an area load. Sampling
@@ -683,10 +683,20 @@ static void remember_link_mesh(uint64_t hash, uint64_t count, uint64_t size) {
 #define LINK_BODY_CENTRE 40.0f
 #define LINK_HEAD_CENTRE 45.0f
 
+// Only while his own body is drawn at the eye point (this frame or the last: g_body_at_eye), and only once it has been
+// drawn that far in LINK_FORGET_FRAMES frames: Link himself drawn away from an eye point not yet moved (a load, a warp)
+// had every mesh of his forgotten at once - 12,800 units away, 2026-11-15 - and his hair showed until it was learnt
+// again (at his face; hanging away from it in a roll or a swing it wasn't).
+#define LINK_FORGET_FRAMES 10
 static void forget_link_mesh(uint64_t hash, uint64_t count, uint64_t size, float distance) {
+    extern uint64_t renderer_present_count(void);
+    const uint64_t now = renderer_present_count() + 1;
+    if (!g_body_at_eye || g_body_at_eye + 1 < now) return;
     for (int i = 0; i < LINK_MESH_CACHE; i++)
         if (g_link_mesh[i].hash == hash && g_link_mesh[i].count == count && g_link_mesh[i].size == size) {
-            g_link_mesh[i] = (LinkMesh){0, 0, 0};
+            if (g_link_mesh[i].far_last != now) g_link_mesh[i].far_last = now, g_link_mesh[i].far_frames++;
+            if (g_link_mesh[i].far_frames < LINK_FORGET_FRAMES) return;
+            g_link_mesh[i] = (LinkMesh){0, 0, 0, 0, 0};
             fprintf(stderr, "[link-log] not his after all (drawn %.0f from his eye): %llu indices, vb %llu bytes\n", distance,
                     (unsigned long long)count, (unsigned long long)size);
         }
