@@ -334,7 +334,7 @@ angle in +0x0e (0 up, 0x4000 left, 0x8000 down, 0xc000 right). It is read from t
 eyes' view (relative to Link's eye point, so walking doesn't skew it), and written in the game's own slashes too. Found
 from a slash's collider dumped update by update, its start (the callers of main+0xa6d158) and the vector it sweeps.
 The angle sent is the path's own (not its direction's centre), and a path within `sword_dir_leeway` degrees (VR Options >
-Slash Direction Leeway, default 10) of the line between two directions gives the colliders direction 0 (Link +0x41e
+Slash Direction Leeway, default 12.5) of the line between two directions gives the colliders direction 0 (Link +0x41e
 keeps the nearest, for his animation): what checks a slash's direction takes it as any.
 
 Measured headset-free on the Sparring Hall's training log (`dAcOsliceLog_c`, states Init/Wait/Slice/Fall/Bound; its

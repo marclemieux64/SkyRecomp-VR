@@ -100,7 +100,7 @@ typedef struct VRConfig {
         ;                                // ... once the blade tip moves faster than this (m/s)
     float sword_dir_leeway
 #ifdef __cplusplus
-        = 10.0f
+        = 12.5f
 #endif
         ;                                // 1st person: a slash this near (degrees) a boundary between two directions counts for any
 } VRConfig;
