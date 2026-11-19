@@ -234,8 +234,11 @@ with `SKYRECOMP_VR_HAND_LOG=1`:
   within 70 units (`HELD_KEEP`).
 - **The game draws no hand:** mid-swing, the swinging arm is part of his body, which is hidden in first person.
 - **The hand is drawn far away:** raising or bashing with the shield draws his left hand 80 to 160 units from it.
-- **Letting go:** only within 30 units of his eye point with no hand drawn, or 45 with the hand drawn far. The
-  sheathed hilt sits 21 to 24 units from it.
+- **Letting go:** by the game's own state (`vr_sword_sheathed`, `vr_shield_raised` in `vr_sword.c`): the sword
+  only while the game has it drawn, the shield only while the sword is drawn or it is raised (action `0x49`).
+  Otherwise both are on his back and let go at once (`held_allowed`, logged `[held-log] ... let go`). By distance
+  alone (within 30 units of his eye point, 45 with the hand drawn far) a shield on his back could sit further out and
+  stay on the controller at its last offset. That rule is kept only while the game's state isn't known (loading).
 - **Gaps:** the holding hand is remembered for 60 frames in which the item isn't drawn.
 - **A controller dropping out:** its last good pose is kept for 60 frames.
 
@@ -333,6 +336,15 @@ counter-clockwise - 0x2 down-right, 0x4 right, 0x8 up-right, 0x10 up, 0x20 up-le
 angle in +0x0e (0 up, 0x4000 left, 0x8000 down, 0xc000 right). It is read from the tip's path over 3 updates across the
 eyes' view (relative to Link's eye point, so walking doesn't skew it), and written in the game's own slashes too. Found
 from a slash's collider dumped update by update, its start (the callers of main+0xa6d158) and the vector it sweeps.
+The angle sent is the path's own (not its direction's centre), and a path within `sword_dir_leeway` degrees (VR Options >
+Slash Direction Leeway, default 12.5) of the line between two directions gives the colliders direction 0 (Link +0x41e
+keeps the nearest, for his animation): what checks a slash's direction takes it as any.
+
+Measured headset-free on the Sparring Hall's training log (`dAcOsliceLog_c`, states Init/Wait/Slice/Fall/Bound; its
+collider at +0x4b8, its hit record at +0xb0 - bit 2 set: deflected, the log stays): the log facing Link cut only with
+direction 0x8 and an angle within 0xc800..0xe800 (0xc000 and 0xec00 bounced, as did 0x80 along the same line); with the
+colliders' direction 0 it cut at any angle. The game's own right slash bounced off it. Its cut itself (the Slice
+state's start) never refuses: the direction and the angle are all that decide.
 
 The white trail is drawn from the sword line's structure - a history of points further in (+0x90, +0x144..+0x168,
 +0x228) - while its u32 at +0x3bc is set (1 in a slash); it is cleared after each update (`SKYRECOMP_VR_SWORD_TRAIL=1`
