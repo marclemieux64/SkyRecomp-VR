@@ -368,6 +368,17 @@ backflip when targeting takes it further - switched off altogether, those left t
   update in flight it is moved just ahead of the right controller and its heading and velocity set along where the
   controller points (Aim Items with the Controller); the game flies it from there. Checked headset-free with
   `SKYRECOMP_BEETLE_TEST_DIR` in a test build: launched along +x, it flew along +x.
+- **Steering:** after each of its updates in flight, its pitch and yaw are set to the right controller's and its roll
+  (+0x140, the actor's third angle - the game's flight writes it) to the controller's twist about where it points;
+  +0x1d4/+0x1d6 follow, and its velocity goes along the new heading at the game's speed. The controller is read
+  against the view as it was at the launch (`vr_rig_controller_aim_frozen`): the eyes follow the game's chase camera
+  in flight, and read against it the controller would turn with the camera. Steering ends for the flight when the
+  game's own update turns it more than 30 degrees from where it was steered (a bounce, a recall), turns it toward
+  Link 3 updates running while the controller doesn't (its return), or after 1200 updates. Not when the game's camera
+  stops following it (main+0x1829ea8 bit 16): that comes ~205 updates in, mid-flight. Tested in VR.
+  `SKYRECOMP_VR_BEETLE_JOYCON=1` keeps the game's Joy-Con steering; `SKYRECOMP_VR_BEETLE_ROLL_SIGN=-1` turns its roll
+  the other way; `SKYRECOMP_BEETLE_LOG=1` logs every steered update, why steering let go, and `[beetle-watch]` lines
+  for fields that start changing after being still (to find its return state).
 - **In flight:** Link's actor +0x7d38 points at it from the launch to the catch (+0x7d98 while held); also +0x74 =
   0x0f and +0x8d4c = 1. While it flies, 1st person hands over to the game's camera following it (as theatre), back
   once it's caught (`SKYRECOMP_VR_BEETLE_FP=1` stays in 1st person). Log: `[vr-rig] the Beetle launched / caught`.

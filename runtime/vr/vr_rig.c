@@ -821,6 +821,8 @@ static pthread_mutex_t g_ctrl_pose_lock = PTHREAD_MUTEX_INITIALIZER;  // (writte
 static bool g_aim_ok;                 // (the right controller's aim pose, local space; and its ray in the game world)
 static float g_aim_pose[7], g_aim_world[6];
 static uint64_t g_aim_world_frame;
+static float g_aim_rel[9], g_aim_anchor[9], g_aim_frozen[9];  // (its rotation against the anchor, the anchor's; frozen)
+static bool g_aim_frozen_ok;
 bool vr_rig_controller_pose(int side, float c[12]) {
     extern uint64_t renderer_present_count(void);
     if (side < 0 || side > 1) return false;
@@ -851,6 +853,7 @@ static void update_controller_poses(const VrRigAnchor *a, const float reference[
         m_mul(a->rotation, rel, rc);
         m_vec(a->rotation, off, p);
         for (int i = 0; i < 3; i++) g_aim_world[i] = p[i] + a->origin[i], g_aim_world[3 + i] = -rc[i * 3 + 2];
+        memcpy(g_aim_rel, rel, sizeof g_aim_rel), memcpy(g_aim_anchor, a->rotation, sizeof g_aim_anchor);
         g_aim_world_frame = renderer_present_count() + 1;
     }
     pthread_mutex_unlock(&g_ctrl_pose_lock);
@@ -869,6 +872,24 @@ bool vr_rig_controller_aim(float o[3], float d[3]) {
     pthread_mutex_lock(&g_ctrl_pose_lock);
     const bool ok = g_aim_world_frame && g_aim_world_frame + 3 >= renderer_present_count() + 1;
     if (ok) memcpy(o, g_aim_world, 12), memcpy(d, g_aim_world + 3, 12);
+    pthread_mutex_unlock(&g_ctrl_pose_lock);
+    return ok;
+}
+// The right controller's pointing direction and its up axis (both unit) in the game world, as if the anchor the eyes
+// stand on had stayed where it was when `freeze` was last true. For runtime/hle/vr_beetle.c: the Beetle turns as the
+// controller turns while the game's camera, which the eyes follow then, chases it - against the live anchor the
+// controller's world direction would turn with that camera and feed back into the steering.
+bool vr_rig_controller_aim_frozen(bool freeze, float d[3], float up[3]) {
+    extern uint64_t renderer_present_count(void);
+    pthread_mutex_lock(&g_ctrl_pose_lock);
+    bool ok = g_aim_world_frame && g_aim_world_frame + 3 >= renderer_present_count() + 1;
+    if (ok && freeze) memcpy(g_aim_frozen, g_aim_anchor, sizeof g_aim_frozen), g_aim_frozen_ok = true;
+    ok = ok && g_aim_frozen_ok;
+    if (ok) {
+        float r[9];
+        m_mul(g_aim_frozen, g_aim_rel, r);
+        for (int i = 0; i < 3; i++) d[i] = -r[i * 3 + 2], up[i] = r[i * 3 + 1];
+    }
     pthread_mutex_unlock(&g_ctrl_pose_lock);
     return ok;
 }
