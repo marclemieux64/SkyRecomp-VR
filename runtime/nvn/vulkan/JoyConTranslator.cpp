@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 
 extern "C" bool vr_sword_spatial(void);  // runtime/hle/vr_sword.c: the sword out in 1st person, its swings spatial
+extern "C" bool vr_shield_raised(void);  // runtime/hle/vr_sword.c: Link's shield up (a flick then bashes)
+extern "C" bool vr_grips_free(void);     // runtime/vr/vr_input.c: the left grip raises the shield, not a flick
 
 namespace skyrecomp::vr {
 namespace {
@@ -24,6 +27,18 @@ float accel_scale() {
     if (v < 0) { const char *e = std::getenv("SKYRECOMP_VR_ACCEL_SCALE"); v = e ? std::max(0.0f, (float)std::atof(e)) : 1.0f; }
     return v;
 }
+// Shield bashes (a flick of the Joy-Con (L) with the shield raised - runtime/hle/vr_sword.c ACTION_SHIELD_UP) came
+// often by accident (user 2026-11-20; taking 1 g off the thrust didn't stop them): while the shield is up the game sees
+// the left Joy-Con held still - no turning, gravity only - except for BashWindowSeconds after a deliberate thrust: the
+// hand moving forward, along where the controller points, faster than SKYRECOMP_VR_BASH_SPEED m/s (1.5); then its real
+// motion goes through and the game bashes as before.
+float bash_speed() {
+    static float v = -1;
+    if (v < 0) { const char *e = std::getenv("SKYRECOMP_VR_BASH_SPEED"); v = e ? std::max(0.0f, (float)std::atof(e)) : 1.5f; }
+    return v;
+}
+constexpr float BashWindowSeconds = 0.15f;
+constexpr float SpinHandSpeed = 1.5f;  // (m/s, each hand: a swing of both at once - a spin attack)
 float accel_smooth_s() {
     static float v = -1;
     if (v < 0) { const char *e = std::getenv("SKYRECOMP_VR_ACCEL_SMOOTH_MS"); v = e ? std::max(0.0f, (float)std::atof(e)) / 1000.0f : 0.0f; }
@@ -162,7 +177,33 @@ void JoyConTranslator::updateHand(int index, const SkyVrHand &in, const Quat &re
     // Reported acceleration: gravity's direction minus the linear acceleration, in g, in the Joy-Con's axes.
     const Vec3 down = toJoyCon({0, -1, 0}, q);
     const float g = accel_scale() / Gravity;
-    const Vec3 linearAccel = toJoyCon({h.accel[0] * g, h.accel[1] * g, h.accel[2] * g}, q);
+    Vec3 linearAccel = toJoyCon({h.accel[0] * g, h.accel[1] * g, h.accel[2] * g}, q);
+    // The left Joy-Con held still - no turning, gravity only - (a) while the shield is up, and (b) whenever the grips are
+    // free (Physical Climbing / Sheathing, runtime/vr/vr_input.c vr_grips_free): there the left grip raises the shield
+    // (a flick sent for it: vr_input_shield_flick, vr_controls.c), and a flick of the hand raising it by accident is
+    // what the "accidental bashes" were (2026-11-20 log: 0 -> 0x49 -> 0, the gate below never opened). Its motion goes
+    // through for BashWindowSeconds after a deliberate thrust with the shield up (a bash) or a swing of both hands at
+    // once (a spin attack: the right hand's last speed).
+    if (index == 0) {
+        static float window;  // (s left of the hand's motion going through)
+        const bool raised = vr_shield_raised();
+        if (!raised && !vr_grips_free()) {
+            window = 0;
+        } else {
+            const Vec3 f = rotate(q, {0, 0, -1});
+            const float fwd = in.velocity_valid ? linear[0] * f[0] + linear[1] * f[1] + linear[2] * f[2] : 0.0f;
+            const bool both = in.velocity_valid && length(linear) > SpinHandSpeed && hands_[1].haveVelocity &&
+                              length(hands_[1].velocity) > SpinHandSpeed;
+            if ((raised && fwd > bash_speed()) || both) {
+                if (window <= 0)
+                    std::fprintf(stderr, "[bash] the left hand's motion goes through: %s (%.2f m/s forward)\n",
+                                 both ? "both hands swinging" : "a thrust with the shield up", fwd);
+                window = BashWindowSeconds;
+            }
+            else if (dt > 0 && dt < 0.1f) window = std::max(0.0f, window - dt);
+            if (window <= 0) linearAccel = {}, gyro = {};
+        }
+    }
     for (int i = 0; i < 3; i++) {
         s.gyro[i] = clampf(gyro[i] / TwoPi, MaxGyroRps);
         s.accel[i] = clampf(down[i] - linearAccel[i], MaxAccelG);

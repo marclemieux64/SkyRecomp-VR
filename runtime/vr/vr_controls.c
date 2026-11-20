@@ -12,6 +12,7 @@
 #if SKYRECOMP_HAS_OPENXR
 #include "hle.h"
 #include "nvn/vulkan/JoyConTranslator.h"
+#include "vr_settings.h"
 
 static bool controllers_off(void) {  // (test) SKYRECOMP_VR_NO_INPUT=1: controllers ignored, for scripted runs
     static int off = -1;
@@ -288,10 +289,28 @@ bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
     extern bool motion_joycon_mode(void);
     if (!sensor || controllers_off() || !motion_joycon_mode() || !sky_joycon_sensor(device, &s)) return false;
     // (the right Joy-Con: an aimed item, the menu pointer, the sword)
-    if (device == 1 && !aim_pointer(&s) && !panel_pointer(&s)) skyward_strike_assist(&s);
+    if (device == 1 && !aim_pointer(&s) && !panel_pointer(&s)) {
+        // Physical Sheathing (vr_input.c): the sword comes out only from over the shoulder, so a swing of the right
+        // Joy-Con doesn't draw it - while it is sheathed and Link is on his feet with nothing in use
+        // (player_bare_on_foot, hle/player.c), the game sees the Joy-Con held still where it points: no turning (gyro)
+        // and gravity only. Its pointing stays, and so does everything with an item out, in water, climbing, flying
+        // (the Loftwing steers by tilt) and with the sword drawn.
+        extern bool player_bare_on_foot(void);
+        extern int vr_sword_sheathed(void);
+        extern bool vr_running(void);
+        if (g_vr_config.physical_sheathing && g_vr_config.view_mode == 1 && vr_running() && vr_sword_sheathed() == 1 &&
+            player_bare_on_foot()) {
+            for (int i = 0; i < 3; i++) s.gyro[i] = 0, s.accel[i] = -s.direction[i * 3 + 2];
+            static int said;
+            if (!said++) LOG("[vr] physical sheathing: a swing of the right controller doesn't draw the sword\n");
+        }
+        skyward_strike_assist(&s);
+    }
     {   // (physical sheathing, vr_input.c: a grab over the shoulder draws the sword with a swing of the Joy-Con)
         extern bool vr_input_draw_swing(float gyro[3], float accel[3]);
         if (device == 1) vr_input_draw_swing(s.gyro, s.accel);
+        extern bool vr_input_shield_flick(float gyro[3], float accel[3]);  // (the left grip raising the shield)
+        if (device == 0) vr_input_shield_flick(s.gyro, s.accel);
     }
     memcpy(sensor, &s, sizeof s);
     return true;

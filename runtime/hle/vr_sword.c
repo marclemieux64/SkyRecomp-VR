@@ -250,6 +250,13 @@ static void player_update_hook(Cpu *c) {
     const bool drawn = sword_drawn(line, eye);
     atomic_store(&g_sheathed, drawn ? 0 : 1);
     atomic_store(&g_shield_raised, *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION) == ACTION_SHIELD_UP);
+    {   // SKYRECOMP_LINK_ACTION_LOG=1: each change of Link's action (+0x468) - which one an accidental shield bash is
+        static int log = -1;
+        static uint32_t last = ~0u;
+        if (log < 0) log = getenv("SKYRECOMP_LINK_ACTION_LOG") != NULL;
+        const uint32_t a = *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION);
+        if (log && a != last) LOG("[link-action] %#x -> %#x\n", last, a), last = a;
+    }
     const bool on = g_vr_config.sword_hitbox && g_vr_config.view_mode == 1 && vr_running() && drawn &&
                     vr_rig_controller_pose(1, grip);
     atomic_store(&g_spatial, on && g_vr_config.sword_swing_hits);
