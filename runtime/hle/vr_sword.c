@@ -215,8 +215,10 @@ static void free_swing_register(Cpu *c, uint64_t pl) {
 
 static void player_update_hook(Cpu *c) {
     const uint64_t pl = c->x[0];
+    extern void vr_dowse_update(uint64_t pl, bool after);  // (dowsing along the blade: runtime/hle/vr_dowse.c)
+    vr_dowse_update(pl, false);
     g_player_update(c);
-    const bool spin = *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION) == ACTION_SPIN;
+    vr_dowse_update(pl, true);    const bool spin = *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION) == ACTION_SPIN;
     if (spin != atomic_load(&g_spin)) {
         atomic_store(&g_spin, spin);
         static int log = -1;

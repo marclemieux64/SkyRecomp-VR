@@ -121,6 +121,8 @@ static int role_of(const char *name) {
         // of on the HUD panel (runtime/nvn/vulkan/exec.c, runtime/hle/vr_aim.c)
         {"th_slingS_", R_AIM}, {"th_sling_", R_AIM}, {"th_arrowCursor", R_AIM}, {"th_hookS_", R_AIM}, {"th_hook_", R_AIM},
         {"th_vaccume", R_AIM}, {"th_circle", R_AIM},
+        // dowsing's ring (th_circle is only its glow): over the sword's gem in VR (runtime/hle/vr_dowse.c)
+        {"th_dowseRing", R_AIM},
     };
     for (unsigned i = 0; i < sizeof m / sizeof *m; i++)
         if (!strncmp(name, m[i].prefix, strlen(m[i].prefix))) return m[i].role;

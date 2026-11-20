@@ -2898,7 +2898,18 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                                     screen_aspect, st.viewport[0][2], st.viewport[0][3], eye_aspect, rt ? rt->width : 0,
                                     rt ? rt->height : 0);
             }
-            const float sy = eye_aspect / screen_aspect;
+            float sy = eye_aspect / screen_aspect;
+            {   // (dowsing's ring and glow over the sword's gem: scaled so, they came out about twice as wide as tall in
+                // the headset - kept as the game draws them instead; SKYRECOMP_VR_DOWSE_RING_Y=<factor> sets their height
+                // factor for a test. runtime/hle/vr_dowse.c)
+                extern bool vr_dowse_active(void);
+                static float dowse_sy = -1;
+                if (dowse_sy < 0) {
+                    const char *e = getenv("SKYRECOMP_VR_DOWSE_RING_Y");
+                    dowse_sy = e && atof(e) > 0 ? (float)atof(e) : 1.0f;
+                }
+                if (vr_dowse_active()) sy = dowse_sy;
+            }
             VkSpan s = vk_transient_copy(u, size, 256);
             float *o = (float *)s.ptr;
             const float px = u[0] * u[19] + u[3], py = u[5] * u[23] + u[7];  // (this piece's place, clip)
@@ -4418,8 +4429,10 @@ static int aim_piece(Prog *pr, bool mv) {
         const int eye = (int)vk_vr_eye() & 1;
         // (this frame's or the last: the dot may be drawn before the other pieces - then it stayed on the HUD panel, a
         // flat reticle of its own beside the one in the world)
+        // (or while dowsing: its ring is the only piece - runtime/hle/vr_dowse.c puts it over the sword's gem)
+        extern bool vr_dowse_active(void);
         if (strncmp(nm, "th_circle", 9)) piece_frame[eye] = renderer_present_count();
-        else if (piece_frame[eye] == ~0ull || piece_frame[eye] + 1 < renderer_present_count()) return 0;
+        else if (!vr_dowse_active() && (piece_frame[eye] == ~0ull || piece_frame[eye] + 1 < renderer_present_count())) return 0;
         if (!strncmp(nm, "th_sling", 8)) vr_aim_slingshot_seen();
         const bool sling = vr_aim_slingshot() && (!strncmp(nm, "th_sling", 8) || !strncmp(nm, "th_circle", 9));
         const float *u = (const float *)(uintptr_t)st.ubuf[0][0].addr;  // (is_hud_draw: the 192-byte 2D block)

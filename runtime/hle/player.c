@@ -84,9 +84,14 @@ static void eye_stale_tick(void) {
     g_eye_stale = stale;
 }
 
+// Dowsing (runtime/hle/vr_dowse.c): the eye point isn't updated while Link dowses - he walked 300-370 units from it
+// (2026-11-20, VR log) and the view stayed behind until the left-behind rule above took over. His own position is
+// the eye point for the whole of it.
+bool vr_dowse_active(void);
+
 static bool player_eye_live(float eye[3]) {
     if (!g_is_skyward_100) return false;  // (game 1.0.0's addresses: not another version's - runtime/main.c)
-    if (g_eye_stale || !heap_ptr(*(const uint64_t *)(uintptr_t)PLAYER_ACTOR_REF)) {  // (no Link - title, loading - or not moved yet)
+    if (g_eye_stale || vr_dowse_active() || !heap_ptr(*(const uint64_t *)(uintptr_t)PLAYER_ACTOR_REF)) {  // (no Link - title, loading - or not moved yet)
         const float *q = player_position_live();
         if (!q) return false;
         if (eye) eye[0] = q[0], eye[1] = q[1] + 150.0f, eye[2] = q[2];

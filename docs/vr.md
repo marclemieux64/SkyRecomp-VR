@@ -398,6 +398,22 @@ backflip when targeting takes it further - switched off altogether, those left t
   Overrides: `SKYRECOMP_VR_BEETLE_ROLL`, `_SHIFT`, `_ARM_BACK`, `_LIFT`. `[beetle-near]` log lines list other draws by
   it (how the bracelet was found).
 
+### Dowsing (`runtime/hle/vr_dowse.c`, `vr_aim.c`, `runtime/nvn/vulkan/exec.c`, `runtime/hle/player.c`)
+
+- **Direction:** dowsing is Link's action 0x68 (his actor +0x468). It looks along two 16-bit angles of his actor,
+  +0x420 pitch (negative up) and +0x422 yaw (copied at +0x645e), which the right stick or the Joy-Con's pointing turns;
+  found headset-free with `SKYRECOMP_LINK_DIFF` (a turn and back, a look up and back). In VR 1st person (with Aim Items
+  with the Controller) they are set to the drawn blade's direction (`vr_rig_held_world`, the sword model's +x; the right
+  controller's -z while the drawn pose isn't known) before and after each of his updates. Checked headset-free with
+  `SKYRECOMP_DOWSE_TEST_DIR`: the game's dowsing view turned to it and the stick no longer moved it. Tested in VR.
+  `SKYRECOMP_DOWSE_LOG=1` logs the angles.
+- **Ring:** its glow is `th_circle` and the ring itself `th_dowseRing*` / `th_dowseRingS*` (Main2D.arc), both taken as
+  aiming reticle pieces (texpatch R_AIM). While dowsing they are drawn in each eye over the sword's gem: 6 units along
+  the blade from the sword model's origin, 6 above (`SKYRECOMP_VR_DOWSE_RING="along up"`), without the 3D reticle's
+  height scaling, which left them about twice as wide as tall (`SKYRECOMP_VR_DOWSE_RING_Y` sets a factor).
+- **View:** the game doesn't update Link's eye point (main+0x1829a30) while he dowses - he walked 300-370 units from it
+  and the view stayed behind - so his own position is the eye point throughout (`player.c`).
+
 ### The boss door's key puzzle (`runtime/hle/player.c`, `vr_rig.c`)
 
 From the A that examines a boss door's lock to the B that backs out (or the door opening), Link's actor +0x9478 points
