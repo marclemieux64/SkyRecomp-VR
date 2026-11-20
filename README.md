@@ -1,3 +1,17 @@
+> [AI DISCLOSURE]
+> This VR mod, and the recomps it's based on, is almost entirely vibecoded. We understand the stigma behind AI usage, and we respect those who do not wish to partake in it.
+>
+> This was not exactly our first choice for development. In fact, I tried putting up a monetary bounty for a barebones mod, but nobody was interested. Skyward Sword just isn't as interesting as, say, Twilight Princess (Thanks Joey!).
+>
+> This doesn't mean this project was made without passion, however. I grew up playing this game on my Wii, and played it till there was nothing left to do. I truly want this to exist, not because of AI, but because I love this game.
+>
+> Please, respect our decision. Voice your opinions, we cannot exactly defend this, but do not attack us over it
+>
+>  - Regards, LionHeart (Discord - LionHeart/@al56201)
+
+
+
+
 # Sky Recomp-VR - Native PC Recompilation - VR Mod
 
 **Sky Recomp-VR** is a native cross-platform port (**Windows**, **Linux**, and **macOS**) based on static AArch64 -> C recompilation of *The Legend of Zelda: Skyward Sword HD*.
