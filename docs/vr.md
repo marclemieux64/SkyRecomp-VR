@@ -416,8 +416,10 @@ backflip when targeting takes it further - switched off altogether, those left t
 
 ### Grips and physical climbing (`runtime/vr/vr_input.c`, `runtime/hle/player.c`)
 
-- **Grips:** the grips are the hands' own (doors, climbing). The game's L / R are a grip squeezed while a stick click
-  is held; a click used so sends no stick press and doesn't open the settings menu (squeeze within the menu hold's
+- **Opt-in:** VR Options > Physical Climbing (`[VR] physical_climbing`, default off). Off, the grips are the game's
+  L / R as before and nothing below runs.
+- **Grips:** with it on, the grips are the hands' own (doors, climbing). The game's L / R are a grip squeezed while a
+  stick click is held; a click used so sends no stick press and doesn't open the settings menu (squeeze within the menu hold's
   0.6 s). Log: `[vr] a stick click held with a grip: the grip is the game's L / R`.
 - **Climbing state:** Link's flags at his actor +0x460 - the decomp's `dAcPy_c::mActionFlags` (zeldaret/ss
   `include/d/d_player_act.h`, Wii +0x364; HD's fields sit 0xfc later, its `mCurrentAction` Wii +0x36c being our

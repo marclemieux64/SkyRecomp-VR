@@ -233,7 +233,7 @@ static void climb_update(SkyVrControllers *s) {
     static float last[3], bank[2], link_last[3];  // bank: [0] right, [1] up (game units)
     static int64_t t_last;
     float link[3];
-    const int kind = off || !s->active || g_vr_config.view_mode != 1 ? 0 : player_climb(link);
+    const int kind = off || !g_vr_config.physical_climbing || !s->active || g_vr_config.view_mode != 1 ? 0 : player_climb(link);
     if (kind != kind_was) LOG("[climb] %s\n", kind == 1 ? "on a ladder" : kind == 2 ? "on ivy" : "off");
     kind_was = kind;
     if (!kind) {
@@ -484,8 +484,8 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         s.zr = get_float(ACT_ZR);
         s.l = get_float(ACT_L);
         s.r = get_float(ACT_R);
-        {   // (the grips free: L / R only with a stick click held - see g_grip)
-            g_grip[0] = s.l, g_grip[1] = s.r;
+        g_grip[0] = s.l, g_grip[1] = s.r;
+        if (g_vr_config.physical_climbing) {  // (the grips free: L / R only with a stick click held - see g_grip)
             const uint32_t clicks = SKY_JC_LSTICK | SKY_JC_RSTICK;
             const bool click = (s.buttons & clicks) != 0;
             if (!click) g_click_modifier = false;
@@ -495,6 +495,8 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
             }
             if (g_click_modifier) s.buttons &= ~clicks;
             else s.l = s.r = 0;
+        } else {
+            g_click_modifier = false;  // (off: the grips are L / R, as before)
         }
         const XrVector2f ls = get_vec2(ACT_LEFT_STICK), rs = get_vec2(ACT_RIGHT_STICK);
         s.stick[0][0] = ls.x; s.stick[0][1] = ls.y;
