@@ -8,7 +8,7 @@
 >
 > This doesn't mean this project was made without passion, however. I grew up playing this game on my Wii, and played it till there was nothing left to do. I truly want this to exist, not because of AI, but because I love this game.
 >
-> Please, respect our decision. Voice your opinions, we cannot exactly defend this, but do not attack us over it
+> Please, respect our decision. Voice your opinions, we cannot exactly defend this, but do not attack us over it.
 >
 >  - Regards, LionHeart (Discord - LionHeart/@al56201)
 
