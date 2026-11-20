@@ -103,6 +103,16 @@ typedef struct VRConfig {
         = 12.5f
 #endif
         ;                                // 1st person: a slash this near (degrees) a boundary between two directions counts for any
+    bool physical_climbing
+#ifdef __cplusplus
+        = false
+#endif
+        ;                                // opt-in: grip and pull to climb (vr_input.c); the grips then aren't L / R
+    bool physical_sheathing
+#ifdef __cplusplus
+        = false
+#endif
+        ;                                // opt-in: grip over the right shoulder draws / puts away the sword (vr_input.c)
 } VRConfig;
 
 // Always contains a validated configuration. LoadVRConfig resets it to defaults first.

@@ -202,6 +202,173 @@ static void haptic(int hand, float amplitude, float ms) {
     p_xrApplyHapticFeedback(session, &hi, (const XrHapticBaseHeader *)&v);
 }
 
+// The grips are the hands' own (physical climbing, doors - g_grip): the game's L / R are a grip squeezed while a stick
+// click is held (vr_input_sync). A stick click used so is a modifier only: no stick press for the game, no settings
+// menu (g_click_modifier cancels menu_input's pending tap / hold).
+static float g_grip[2];
+static bool g_click_modifier;
+
+// ---- Physical climbing (the design of TPVR's, JoeyAW's Twilight Princess VR mod, CC0): on a ladder or ivy, squeeze a
+// grip to take hold and pull: the pull drives the game's own climbing through the left stick, so its rung steps, its
+// ends and its wall checks stay the game's. Link's state from runtime/hle/player.c player_climb (his flags +0x460).
+// While a grip holds, that hand's motion in the room (not Link's: the view moves with him) is banked as movement owed
+// to his body - the hand pulled down is the body owed up; on ivy, sideways too (the hand pulled left: owed right,
+// along the head reference's right) - capped at CLIMB_BANK_MAX units (about two rungs). Link's own movement pays it
+// off. The bank becomes the stick along its larger axis: |bank| / CLIMB_FULL, at least CLIMB_MIN_STICK, past
+// CLIMB_DEADZONE; below that the real stick is left alone. A grip squeezed while climbing isn't the game's L / R.
+// Buzz on taking hold. SKYRECOMP_VR_NO_CLIMB=1 turns it off; SKYRECOMP_CLIMB_LOG=1 logs the bank and stick.
+#define CLIMB_GRIP_ON 0.6f
+#define CLIMB_GRIP_OFF 0.4f
+#define CLIMB_BANK_MAX 75.0f
+#define CLIMB_DEADZONE 6.0f
+#define CLIMB_FULL 30.0f
+#define CLIMB_MIN_STICK 0.35f
+#define CLIMB_RELEASE_TAU 0.5f  // (s: a bank left when no hand holds fades, so a pull at the top doesn't walk him off)
+static void climb_update(SkyVrControllers *s) {
+    static int off = -1, log = -1;
+    if (off < 0) off = getenv("SKYRECOMP_VR_NO_CLIMB") != NULL, log = getenv("SKYRECOMP_CLIMB_LOG") != NULL;
+    extern int player_climb(float pos[3]);
+    static int kind_was, hand = -1;
+    static bool down[2], link_ok;
+    static float last[3], bank[2], link_last[3];  // bank: [0] right, [1] up (game units)
+    static int64_t t_last;
+    float link[3];
+    const int kind = off || !g_vr_config.physical_climbing || !s->active || g_vr_config.view_mode != 1 ? 0 : player_climb(link);
+    if (kind != kind_was) LOG("[climb] %s\n", kind == 1 ? "on a ladder" : kind == 2 ? "on ivy" : "off");
+    kind_was = kind;
+    if (!kind) {
+        hand = -1, down[0] = down[1] = link_ok = false, bank[0] = bank[1] = 0, t_last = 0;
+        return;
+    }
+    const float dt = t_last && s->time_ns > t_last ? fminf((float)(s->time_ns - t_last) * 1e-9f, 0.1f) : 0.0f;
+    t_last = s->time_ns;
+    const float grip[2] = {g_grip[0], g_grip[1]};  // (the hands' own grips)
+    for (int h = 0; h < 2; h++) {
+        if (!down[h] && grip[h] > CLIMB_GRIP_ON && s->hand[h].tracked) {
+            down[h] = true, hand = h;  // (the newest hold wins)
+            memcpy(last, s->hand[h].position, sizeof last);
+            haptic(h, 0.35f, 25);
+        } else if (down[h] && (grip[h] < CLIMB_GRIP_OFF || !s->hand[h].tracked)) {
+            down[h] = false;
+            if (hand == h) {
+                hand = down[!h] ? !h : -1;
+                if (hand >= 0) memcpy(last, s->hand[hand].position, sizeof last);
+            }
+        }
+    }
+    const float units = g_vr_config.world_scale;
+    if (hand >= 0) {
+        const float *p = s->hand[hand].position;
+        const float d[3] = {p[0] - last[0], p[1] - last[1], p[2] - last[2]};
+        memcpy(last, p, sizeof last);
+        bank[1] -= d[1] * units;
+        if (kind == 2) {  // (the head reference's right, level: x of its yaw)
+            const float *q = s->reference;
+            float r[3] = {1 - 2 * (q[1] * q[1] + q[2] * q[2]), 0, 2 * (q[0] * q[2] - q[3] * q[1])};
+            const float n = sqrtf(r[0] * r[0] + r[2] * r[2]);
+            if (n > 1e-3f) bank[0] -= (d[0] * r[0] + d[2] * r[2]) / n * units;
+        }
+    } else if (dt > 0) {
+        const float k = expf(-dt / CLIMB_RELEASE_TAU);
+        bank[0] *= k, bank[1] *= k;
+    }
+    if (link_ok) {  // (Link's own movement pays it off, never past zero)
+        const float dy = link[1] - link_last[1], dh = sqrtf((link[0] - link_last[0]) * (link[0] - link_last[0]) +
+                                                            (link[2] - link_last[2]) * (link[2] - link_last[2]));
+        if (dy * bank[1] > 0) bank[1] = bank[1] > 0 ? fmaxf(0, bank[1] - dy) : fminf(0, bank[1] - dy);
+        bank[0] = bank[0] > 0 ? fmaxf(0, bank[0] - dh) : fminf(0, bank[0] + dh);
+    }
+    memcpy(link_last, link, sizeof link_last), link_ok = true;
+    for (int i = 0; i < 2; i++) bank[i] = fmaxf(-CLIMB_BANK_MAX, fminf(CLIMB_BANK_MAX, bank[i]));
+    if (down[0]) s->l = 0;
+    if (down[1]) s->r = 0;
+    const int axis = fabsf(bank[0]) > fabsf(bank[1]) ? 0 : 1;
+    const float b = bank[axis];
+    float stick[2] = {0, 0};
+    const bool drive = fabsf(b) >= CLIMB_DEADZONE;
+    if (drive) {
+        stick[axis] = fminf(1.0f, fmaxf(CLIMB_MIN_STICK, fabsf(b) / CLIMB_FULL)) * (b > 0 ? 1.0f : -1.0f);
+        s->stick[0][0] = stick[0], s->stick[0][1] = stick[1];
+    }
+    static int n;
+    if (log && n++ % 30 == 0)
+        LOG("[climb] %s hand %d: owed right %.1f up %.1f -> stick %.2f %.2f%s\n", kind == 1 ? "ladder" : "ivy", hand,
+            bank[0], bank[1], stick[0], stick[1], drive ? "" : " (the real stick)");
+}
+
+// ---- Physical sheathing (VR Options > Physical Sheathing, opt-in; the design of TPVR's, JoeyAW, CC0): the sword is
+// over the right shoulder. The right hand there - in the head's level frame (yaw only, metres from between the eyes):
+// at most SHEATH_FWD in front, SHEATH_UP_LO..SHEATH_UP_HI up, SHEATH_SIDE_LO..SHEATH_SIDE_HI to the right; a little
+// more to leave it - squeezing the right grip while the sword is sheathed (vr_sword_sheathed, hle/vr_sword.c) draws it:
+// a swing of the right Joy-Con for SHEATH_SWING_NS (vr_input_draw_swing: the game draws its sword when the Joy-Con is
+// swung), a strong buzz. Letting go of the grip there while it is drawn - once the hand has left the spot since it was
+// drawn - puts it away: B for SHEATH_B_NS (the game's Put Away), a lighter buzz. Not while he climbs.
+// Log: [sheath] lines.
+#define SHEATH_FWD 0.10f
+#define SHEATH_UP_LO -0.30f
+#define SHEATH_UP_HI 0.30f
+#define SHEATH_SIDE_LO -0.05f
+#define SHEATH_SIDE_HI 0.40f
+#define SHEATH_MARGIN 0.08f
+#define SHEATH_SWING_NS 150000000ull
+#define SHEATH_B_NS 150000000ull
+static _Atomic uint64_t g_draw_swing_until;
+// (vr_controls.c, the right Joy-Con's sensor) a swing to draw the sword: gyro (rev/s about x y z) and acceleration (g)
+bool vr_input_draw_swing(float gyro[3], float accel[3]) {
+    if (SDL_GetTicksNS() >= atomic_load(&g_draw_swing_until)) return false;
+    gyro[0] = 3.0f, gyro[1] = 0, gyro[2] = 0;
+    accel[0] = 0, accel[1] = 3.0f, accel[2] = -1.0f;
+    return true;
+}
+static void sheath_update(SkyVrControllers *s) {
+    extern bool vr_head_pose(float q[4], float p[3]);
+    extern int vr_sword_sheathed(void), player_climb(float pos[3]);
+    static bool in_zone, armed = true, held;
+    static uint64_t b_until;
+    const uint64_t now = SDL_GetTicksNS();
+    if (now < b_until) s->buttons |= SKY_JC_B;
+    float q[4], head[3];
+    const SkyVrHand *h = &s->hand[1];
+    if (!g_vr_config.physical_sheathing || g_vr_config.view_mode != 1 || !s->active || !h->tracked ||
+        !vr_head_pose(q, head) || player_climb(NULL)) {
+        in_zone = held = false, armed = true;
+        return;
+    }
+    // (the head's forward, level: -z of its orientation; right: forward turned a quarter to the right)
+    float f[3] = {-2 * (q[0] * q[2] + q[3] * q[1]), 0, -(1 - 2 * (q[0] * q[0] + q[1] * q[1]))};
+    const float n = sqrtf(f[0] * f[0] + f[2] * f[2]);
+    if (n < 1e-3f) return;
+    f[0] /= n, f[2] /= n;
+    const float r[3] = {-f[2], 0, f[0]};
+    const float d[3] = {h->position[0] - head[0], h->position[1] - head[1], h->position[2] - head[2]};
+    const float fwd = d[0] * f[0] + d[2] * f[2], up = d[1], side = d[0] * r[0] + d[2] * r[2];
+    const float m = in_zone ? SHEATH_MARGIN : 0.0f;
+    const bool was_in = in_zone;
+    in_zone = fwd <= SHEATH_FWD + m && up >= SHEATH_UP_LO - m && up <= SHEATH_UP_HI + m && side >= SHEATH_SIDE_LO - m &&
+              side <= SHEATH_SIDE_HI + m;
+    if (in_zone && !was_in) haptic(1, 0.15f, 10);  // (a light tick: at the hilt)
+    if (!in_zone) armed = true;
+    const float g = g_grip[1];
+    const bool press = !held && g > 0.6f, release = held && g < 0.4f;
+    if (press) held = true;
+    if (release) held = false;
+    const int sheathed = vr_sword_sheathed();
+    if (press && in_zone && sheathed == 1) {
+        atomic_store(&g_draw_swing_until, now + SHEATH_SWING_NS);
+        armed = false;
+        haptic(1, 0.8f, 40);
+        LOG("[sheath] drawn from over the shoulder (hand %.2f forward, %.2f up, %.2f right of the head)\n", fwd, up, side);
+    } else if (release && in_zone && sheathed == 0 && armed) {
+        b_until = now + SHEATH_B_NS;
+        s->buttons |= SKY_JC_B;
+        haptic(1, 0.5f, 30);
+        LOG("[sheath] put away over the shoulder\n");
+    } else if ((press || release) && in_zone) {
+        LOG("[sheath] grip %s at the shoulder: sword %s%s\n", press ? "squeezed" : "let go",
+            sheathed == 1 ? "sheathed" : sheathed == 0 ? "drawn" : "unknown", armed ? "" : " (not since leaving the spot)");
+    }
+}
+
 // The settings menu / name entry on the VR panel (ui/menu.mm), from the controllers (after ShipWright VR):
 //  - holding the left stick click 0.6 s opens / closes the settings menu; a tap still reaches the game, as a short
 //    press when released (at press time a tap can't be told from the start of a hold);
@@ -226,6 +393,7 @@ static void menu_input(SkyVrControllers *s) {
     // Left stick click: hold toggles the settings menu, a tap goes to the game on release.
     const bool stick = (s->buttons & SKY_JC_LSTICK) != 0;
     if (stick && !stick_was) stick_pending = true, stick_down_at = now;
+    if (g_click_modifier) stick_pending = false;  // (held for a grip's L / R instead)
     if (stick_pending && stick && now - stick_down_at >= 0.6) {
         stick_pending = false;
         menu_vr_toggle();
@@ -389,6 +557,20 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         s.zr = get_float(ACT_ZR);
         s.l = get_float(ACT_L);
         s.r = get_float(ACT_R);
+        g_grip[0] = s.l, g_grip[1] = s.r;
+        if (g_vr_config.physical_climbing || g_vr_config.physical_sheathing) {  // (the grips free: L / R only with a stick click held - see g_grip)
+            const uint32_t clicks = SKY_JC_LSTICK | SKY_JC_RSTICK;
+            const bool click = (s.buttons & clicks) != 0;
+            if (!click) g_click_modifier = false;
+            else if (s.l > 0.6f || s.r > 0.6f) {
+                if (!g_click_modifier) LOG("[vr] a stick click held with a grip: the grip is the game's %s\n", s.l > 0.6f ? "L" : "R");
+                g_click_modifier = true;
+            }
+            if (g_click_modifier) s.buttons &= ~clicks;
+            else s.l = s.r = 0;
+        } else {
+            g_click_modifier = false;  // (off: the grips are L / R, as before)
+        }
         const XrVector2f ls = get_vec2(ACT_LEFT_STICK), rs = get_vec2(ACT_RIGHT_STICK);
         s.stick[0][0] = ls.x; s.stick[0][1] = ls.y;
         { extern float g_door_stick; g_door_stick = sqrtf(ls.x * ls.x + ls.y * ls.y); }  // (hle/door.c trace)
@@ -446,6 +628,8 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         // (a menu over the live world - Gear, map: the left stick walked Link behind it; menus pick with the pointer)
         extern bool vr_world_menu_active(void);
         if (paused && vr_world_menu_active()) s.stick[0][0] = s.stick[0][1] = 0;
+        if (!paused) climb_update(&s);  // (physical climbing: after the stick's turn - up the ladder is up)
+        if (!paused) sheath_update(&s);  // (physical sheathing: the sword over the right shoulder)
         // VR Options > Door Opening: at a door (Link's action 0x6a, hle/player.c), grab with a grip, turn the wrist at
         // least 90 degrees and pull the hand back 12 cm: A is pressed for the game, which plays its own door sequence
         // (the next room loads, the door closes behind him). Buzz on the grab and when the turn is far enough.
@@ -465,7 +649,7 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
                 static bool last_grip[2];
                 const int action = player_action();
                 if (action != last_action) LOG("[door] action %#x\n", action), last_action = action;
-                const float g[2] = {s.l, s.r};
+                const float g[2] = {g_grip[0], g_grip[1]};
                 for (int h = 0; h < 2; h++)
                     if ((g[h] > 0.6f) != last_grip[h]) {
                         last_grip[h] = g[h] > 0.6f;
@@ -475,7 +659,7 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
             }
             if ((!at_door && !opening) || !gesture) hand = -1;
             if (hand < 0) opening = false;
-            const float grip[2] = {s.l, s.r};
+            const float grip[2] = {g_grip[0], g_grip[1]};  // (the hands' own grips, not the game's L / R)
             // the handle (hle/door.c): a hand within reach of it hovers (a light tick), and only such a hand grabs
             extern bool door_handle(float w[3]);
             extern bool vr_rig_controller_world(int side, float w[3]);

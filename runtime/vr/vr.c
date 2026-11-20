@@ -619,6 +619,17 @@ static void apply_turn(void) {
     reference_pose[6] = hz - x * sd + z * cd;
 }
 
+// The head now (OpenXR local space, as the controllers): between the eyes, eye 0's orientation (x y z w). False before
+// the first located frame. (vr_input.c: physical sheathing's spot over the shoulder)
+bool vr_head_pose(float q[4], float p[3]) {
+    const XrPosef *a = &frame.views[0].pose, *b = &frame.views[1].pose;
+    if (a->orientation.w == 0 && a->orientation.x == 0 && a->orientation.y == 0 && a->orientation.z == 0) return false;
+    q[0] = a->orientation.x, q[1] = a->orientation.y, q[2] = a->orientation.z, q[3] = a->orientation.w;
+    p[0] = (a->position.x + b->position.x) * 0.5f, p[1] = (a->position.y + b->position.y) * 0.5f;
+    p[2] = (a->position.z + b->position.z) * 0.5f;
+    return true;
+}
+
 static bool locate_views(void) {
     static int logged;
     const XrSpaceLocationFlags tracked = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;

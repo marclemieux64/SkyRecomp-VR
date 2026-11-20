@@ -183,6 +183,14 @@ so forward walks where the player looks (or points). `SKYRECOMP_VR_SHOW_LINK=1` 
 eye point (Loftwing flight, where that point stops updating; far cinematic cameras) 1st person shows the 3rd-person
 view after 20 frames (a one-off camera cut doesn't switch it), and returns below 1000 units.
 
+Eye point left behind: in Eldin, after a short jump at the bottom of the incline to the volcano's gate, the view
+followed Link's animated head all the way up (bobbing, the sword and shield back on him, the Beetle's camera kept after
+it came back), as if the eye point (main+0x1829a30) had stayed where he jumped. While Link himself
+(*(main+0x2bf9940) +0x144) is more than 150 units across from the eye point for 90 frames running, his own position
+(+150 up) is the eye point until they are within 50 units again (`runtime/hle/player.c`, not in the sky's F02x
+stages, where the eye point waits while he rides his Loftwing). Tested in VR. Log: `[player] eye point left behind /
+caught up`; `[vr-rig] the view follows / leaves his animated head` marks the head-following itself.
+
 Swimming: the game keeps Link's eye point at the water surface, which would cut the view in half (and the water's
 screen-space reflection breaks into flat fans right at its plane). In water the eye point is more than 153 units above
 his feet (Link's actor +0x154; on land it is feet + 150, up to 151.2 measured) and holds perfectly still for 10
@@ -389,6 +397,51 @@ backflip when targeting takes it further - switched off altogether, those left t
   (against the aim ray, 20 units) and lifted (10, world up); the bracelet takes the Beetle's rigid body's move.
   Overrides: `SKYRECOMP_VR_BEETLE_ROLL`, `_SHIFT`, `_ARM_BACK`, `_LIFT`. `[beetle-near]` log lines list other draws by
   it (how the bracelet was found).
+
+### Dowsing (`runtime/hle/vr_dowse.c`, `vr_aim.c`, `runtime/nvn/vulkan/exec.c`, `runtime/hle/player.c`)
+
+- **Direction:** dowsing is Link's action 0x68 (his actor +0x468). It looks along two 16-bit angles of his actor,
+  +0x420 pitch (negative up) and +0x422 yaw (copied at +0x645e), which the right stick or the Joy-Con's pointing turns;
+  found headset-free with `SKYRECOMP_LINK_DIFF` (a turn and back, a look up and back). In VR 1st person (with Aim Items
+  with the Controller) they are set to the drawn blade's direction (`vr_rig_held_world`, the sword model's +x; the right
+  controller's -z while the drawn pose isn't known) before and after each of his updates. Checked headset-free with
+  `SKYRECOMP_DOWSE_TEST_DIR`: the game's dowsing view turned to it and the stick no longer moved it. Tested in VR.
+  `SKYRECOMP_DOWSE_LOG=1` logs the angles.
+- **Ring:** its glow is `th_circle` and the ring itself `th_dowseRing*` / `th_dowseRingS*` (Main2D.arc), both taken as
+  aiming reticle pieces (texpatch R_AIM). While dowsing they are drawn in each eye over the sword's gem: 6 units along
+  the blade from the sword model's origin, 6 above (`SKYRECOMP_VR_DOWSE_RING="along up"`), without the 3D reticle's
+  height scaling, which left them about twice as wide as tall (`SKYRECOMP_VR_DOWSE_RING_Y` sets a factor).
+- **View:** the game doesn't update Link's eye point (main+0x1829a30) while he dowses - he walked 300-370 units from it
+  and the view stayed behind - so his own position is the eye point throughout (`player.c`).
+
+### Grips and physical climbing (`runtime/vr/vr_input.c`, `runtime/hle/player.c`)
+
+- **Opt-in:** VR Options > Physical Climbing (`[VR] physical_climbing`, default off). Off, the grips are the game's
+  L / R as before and nothing below runs.
+- **Grips:** with it on, the grips are the hands' own (doors, climbing). The game's L / R are a grip squeezed while a
+  stick click is held; a click used so sends no stick press and doesn't open the settings menu (squeeze within the menu hold's
+  0.6 s). Log: `[vr] a stick click held with a grip: the grip is the game's L / R`.
+- **Climbing state:** Link's flags at his actor +0x460 - the decomp's `dAcPy_c::mActionFlags` (zeldaret/ss
+  `include/d/d_player_act.h`, Wii +0x364; HD's fields sit 0xfc later, its `mCurrentAction` Wii +0x36c being our
+  +0x468). `FLG0_ON_LADDDER` 0x20000, `FLG0_ON_VINES` 0x10000 (ivy). Seen in VR: `[climb] on ivy`.
+- **Climbing** (the design of [TPVR](https://github.com/JoeyAW/TPVR)'s, JoeyAW's Twilight Princess VR mod, CC0): a
+  squeezed grip (0.6 on, 0.4 off, the newest wins; a buzz) banks the hand's motion in the room as movement owed to his
+  body - pulled down is owed up; on ivy, sideways along the head reference's right too - capped at 75 units. Link's
+  own movement pays it off; with no hand holding it fades (0.5 s). The larger axis becomes the left stick (after the
+  stick's turn to the head): |bank| / 30, at least 0.35, past 6 units; below that the real stick is left alone. So the
+  game's own climbing - its rung steps, ends and wall checks - runs on it. `SKYRECOMP_VR_NO_CLIMB=1` turns it off;
+  `SKYRECOMP_CLIMB_LOG=1` logs the bank and the stick. Tested in VR.
+- **Physical sheathing** (VR Options > Physical Sheathing, `[VR] physical_sheathing`, default off; also frees the
+  grips): the right hand over the right shoulder - in the head's level frame (`vr_head_pose`, `vr.c`: between the
+  eyes), at most 0.10 m in front, -0.30..0.30 m up, -0.05..0.40 m to the right, 0.08 m more to leave - with a light tick
+  on reaching it. Squeezing the right grip there while the sword is sheathed (`vr_sword_sheathed`) draws it: the
+  right Joy-Con is swung for 150 ms (`vr_input_draw_swing`, read in `vr_controls.c`: 3 rev/s about x, 3 g), as the game
+  draws its sword when the Joy-Con is swung. Letting go there while it is drawn, once the hand has left the spot since,
+  puts it away: B for 150 ms (the game's Put Away). Not while climbing. Log: `[sheath]`. Tested in VR.
+- **Held items while climbing:** no sword or shield is learned while he climbs or the Beetle flies, nor for 240 frames
+  after (`vr_rig.c` held_learn): climbing ivy had learned a 168-index "sword" and a 348-index "shield" from meshes by
+  his hands. Wrong entries in `vr_held_models.txt` (`<kind> <index count>` lines) can be deleted; real ones are
+  learned again.
 
 ### The boss door's key puzzle (`runtime/hle/player.c`, `vr_rig.c`)
 

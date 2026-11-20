@@ -285,10 +285,13 @@ bool vr_aim_marker(float p[3]) {
 
 // (exec.c) An end point and both eyes' cameras, recent: the reticle can go to the eyes (else it stays on the panel,
 // the same in both eyes)
+// (dowsing - runtime/hle/vr_dowse.c: its ring goes over the sword's gem, no end point needed)
+bool vr_dowse_ring(float p[3]);
 bool vr_aim_ready(void) {
     const uint64_t f = renderer_present_count();
-    return g_P_frame != ~0ull && g_P_frame + 10 >= f && g_eye_frame[0] != ~0ull && g_eye_frame[0] + 1 >= f &&
-           g_eye_frame[1] != ~0ull && g_eye_frame[1] + 1 >= f;
+    float gem[3];
+    return (vr_dowse_ring(gem) || (g_P_frame != ~0ull && g_P_frame + 10 >= f)) && g_eye_frame[0] != ~0ull &&
+           g_eye_frame[0] + 1 >= f && g_eye_frame[1] != ~0ull && g_eye_frame[1] + 1 >= f;
 }
 
 // The reticle in eye `eye`: where its centre goes in that eye's picture (clip x, y) and where its centre is now on
@@ -300,10 +303,21 @@ bool vr_aim_target(int eye, float target[2], float centre[2]) {
     static float latch[2];
     const uint64_t f = renderer_present_count();
     float V[12], c[3], ke[4];
-    if (eye < 0 || eye > 1 || g_P_frame == ~0ull || g_P_frame + 10 < f || g_eye_frame[eye] == ~0ull || g_eye_frame[eye] + 1 < f ||
-        g_center_frame == ~0ull || g_center_frame + 10 < f || !game_camera_view(V))
+    float gem[3];
+    const bool dowse = vr_dowse_ring(gem);  // (dowsing: the ring over the sword's gem instead of an end point)
+    if (eye < 0 || eye > 1 || (!dowse && (g_P_frame == ~0ull || g_P_frame + 10 < f)) || g_eye_frame[eye] == ~0ull ||
+        g_eye_frame[eye] + 1 < f || g_center_frame == ~0ull || g_center_frame + 10 < f || !game_camera_view(V))
         return false;
     if (latch_frame != f) latch_frame = f, latch[0] = g_center[0], latch[1] = g_center[1];
+    if (dowse) {
+        to_cam(V, gem, c);
+        if (!to_clip(g_eye[eye], c, ke)) return false;
+        target[0] = ke[0] / ke[3], target[1] = ke[1] / ke[3];
+        centre[0] = latch[0], centre[1] = latch[1];
+        static int said;
+        if (!said++) LOG("[vr] dowsing: the ring is drawn over the sword's gem\n");
+        return isfinite(target[0]) && isfinite(target[1]);
+    }
     // On the game's own aim - the line from its camera through its reticle, where the shot goes - at the end point's
     // depth along it: the end point is on the controller's ray, which the game's reticle follows a frame or two late,
     // so drawn there the reticle in the world and the shot (and the game's reticle) parted while the hand moved.

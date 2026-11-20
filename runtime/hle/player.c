@@ -55,9 +55,43 @@ static bool player_yaw_live(float *yaw) {
     return true;
 }
 
+// The eye point left behind: in Eldin (2026-11-20), after a short jump at the bottom of the incline to the volcano's
+// gate, the view followed his animated head (bobbing; the sword and shield back on him; the Beetle's camera kept after
+// it came back) all the way up - as if the eye point had stayed where he jumped. While Link himself is more than
+// EYE_STALE_FAR units across from the eye point for EYE_STALE_FRAMES frames running, his own position (+150 up) is the
+// eye point until they are within EYE_STALE_NEAR again. Not in the sky (stages F02x), where the eye point waits while
+// he rides his Loftwing and the view is the game's (theatre). Log: [player] eye point left behind / caught up.
+#define EYE_STALE_FAR 150.0f
+#define EYE_STALE_NEAR 50.0f
+#define EYE_STALE_FRAMES 90
+static _Atomic bool g_eye_stale;
+static void eye_stale_tick(void) {
+    static int far;
+    bool stale = false;
+    const float *q = g_is_skyward_100 ? player_position_live() : NULL;
+    if (q && heap_ptr(*(const uint64_t *)(uintptr_t)PLAYER_ACTOR_REF) &&
+        memcmp((const void *)(uintptr_t)(MAIN_BASE + 0x2bf98d8ull), "F02", 3)) {
+        const float *e = (const float *)(uintptr_t)PLAYER_EYE;
+        const float dx = q[0] - e[0], dz = q[2] - e[2], d = sqrtf(dx * dx + dz * dz);
+        if (!isfinite(d) || d < EYE_STALE_NEAR) far = 0;
+        else if (d > EYE_STALE_FAR || far >= EYE_STALE_FRAMES) far++;
+        stale = far >= EYE_STALE_FRAMES;
+        if (stale != g_eye_stale)
+            LOG("[player] eye point %s: Link %.0f units across from it (eye %.0f %.0f %.0f, Link %.0f %.0f %.0f)\n",
+                stale ? "left behind - his own position is the eye point" : "caught up", d, e[0], e[1], e[2], q[0], q[1], q[2]);
+    } else far = 0;
+    if (!stale && g_eye_stale && !q) LOG("[player] eye point caught up (Link not found)\n");
+    g_eye_stale = stale;
+}
+
+// Dowsing (runtime/hle/vr_dowse.c): the eye point isn't updated while Link dowses - he walked 300-370 units from it
+// (2026-11-20, VR log) and the view stayed behind until the left-behind rule above took over. His own position is
+// the eye point for the whole of it.
+bool vr_dowse_active(void);
+
 static bool player_eye_live(float eye[3]) {
     if (!g_is_skyward_100) return false;  // (game 1.0.0's addresses: not another version's - runtime/main.c)
-    if (!heap_ptr(*(const uint64_t *)(uintptr_t)PLAYER_ACTOR_REF)) {  // (no Link - title, loading - or not moved yet)
+    if (g_eye_stale || vr_dowse_active() || !heap_ptr(*(const uint64_t *)(uintptr_t)PLAYER_ACTOR_REF)) {  // (no Link - title, loading - or not moved yet)
         const float *q = player_position_live();
         if (!q) return false;
         if (eye) eye[0] = q[0], eye[1] = q[1] + 150.0f, eye[2] = q[2];
@@ -115,6 +149,21 @@ static bool player_beetle_flying_live(void) {
     if (heap_ptr(b) && *(const volatile uint64_t *)(uintptr_t)b == BEETLE_VTABLE) return true;
     return *(const volatile uint32_t *)(uintptr_t)(actor + 0x74) == 0x0f &&
            *(const volatile uint32_t *)(uintptr_t)(actor + 0x8d4c) == 1;
+}
+
+// Climbing (runtime/vr/vr_input.c, physical climbing): Link's state flags, his actor (*(main+0x2bf9940)) +0x460 - the
+// decomp's dAcPy_c::mActionFlags (zeldaret/ss include/d/d_player_act.h, Wii +0x364; HD's fields sit 0xfc later: its
+// mCurrentAction, Wii +0x36c, is our +0x468). FLG0_ON_LADDDER 0x20000, FLG0_ON_VINES 0x10000 (ivy walls). Checked
+// against a dowse: +0x460 gained the decomp's three "use item" bits and lost FLG0_UNK_GEN_MOVE.
+// 0: neither, 1: a ladder, 2: vines; pos: Link's position (+0x144).
+int player_climb(float pos[3]) {
+    if (!g_is_skyward_100) return 0;
+    const uint64_t p = *(const uint64_t *)(uintptr_t)PLAYER_PTR;
+    if (!heap_ptr(p) || (p & 7) || *(const uint64_t *)(uintptr_t)p != PLAYER_VTABLE) return 0;
+    const uint32_t f = *(const volatile uint32_t *)(uintptr_t)(p + 0x460);
+    const int kind = f & 0x20000 ? 1 : f & 0x10000 ? 2 : 0;
+    if (kind && pos) memcpy(pos, (const void *)(uintptr_t)(p + 0x144), 12);
+    return kind;
 }
 
 #define GAME_CAMERA_VIEW (MAIN_BASE + 0x2bfda90ull)
@@ -203,6 +252,7 @@ bool game_camera_view(float view[12]) {
 void player_trace_tick(uint64_t frame) {
     static int on = -1;
     if (on < 0) on = getenv("SKYRECOMP_PLAYER_TRACE") != NULL;
+    eye_stale_tick();
     {   // (RE) SKYRECOMP_PLAYER_SNAP=<file>: every 30 frames, Link's actor (0x3000 bytes from its pointer - 0x800) and
         // the player globals (main+0x1829800, 0x800 bytes), to find state flags (e.g. swimming) by diffing
         static FILE *snap;
