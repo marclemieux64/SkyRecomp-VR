@@ -1583,11 +1583,21 @@ void vr_rig_skinned_note(const float *slot0, uint64_t size0, const float *bones,
 // (a rigid draw that is no known item or part) Learning a sword's or shield's model - HELD_LEARN_FRAMES, above.
 #define HELD_LEARN_RIGID 2.0f   // (units: its offset in the hand's frame kept this close)
 #define HELD_LEARN_MOVE 8.0f    // (units: the hand moved this far about his eye point meanwhile)
+#define HELD_LEARN_CLIMB_GAP 240  // (frames after climbing or a Beetle flight before anything is learned again: ~2 s)
 static struct { uint64_t count, last; int side, frames; float t0[3], h0[3], moved; } g_learn[8];
 static void held_learn(const float *m, uint64_t count, uint64_t now) {
     static int on = -1;
     if (on < 0) on = getenv("SKYRECOMP_VR_HELD_LEARN") ? atoi(getenv("SKYRECOMP_VR_HELD_LEARN")) != 0 : 1;
     if (!on || count < HELD_LEARN_MIN_COUNT || !g_rig.have_game_view) return;
+    {   // (not while he climbs, nor for HELD_LEARN_CLIMB_GAP frames after: his hands move along a ladder or ivy and the
+        // meshes by them - 2026-11-20 a 168-index "sword" and a 348-index "shield" learned climbing ivy, drawn in the
+        // hands since. Nor while the Beetle is out: its blade, 330, and its bracelet, 768, had been learned as swords.)
+        extern int player_climb(float pos[3]);
+        extern bool player_beetle_flying(void);
+        static uint64_t busy_frame;
+        if (player_climb(NULL) || player_beetle_flying()) busy_frame = now;
+        if (busy_frame && now < busy_frame + HELD_LEARN_CLIMB_GAP) return;
+    }
     float e[3];  // (his eye point, in the camera space the blocks are in)
     {
         const float *v = g_rig.game_view;

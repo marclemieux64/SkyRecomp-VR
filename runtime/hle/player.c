@@ -151,6 +151,21 @@ static bool player_beetle_flying_live(void) {
            *(const volatile uint32_t *)(uintptr_t)(actor + 0x8d4c) == 1;
 }
 
+// Climbing (runtime/vr/vr_input.c, physical climbing): Link's state flags, his actor (*(main+0x2bf9940)) +0x460 - the
+// decomp's dAcPy_c::mActionFlags (zeldaret/ss include/d/d_player_act.h, Wii +0x364; HD's fields sit 0xfc later: its
+// mCurrentAction, Wii +0x36c, is our +0x468). FLG0_ON_LADDDER 0x20000, FLG0_ON_VINES 0x10000 (ivy walls). Checked
+// against a dowse: +0x460 gained the decomp's three "use item" bits and lost FLG0_UNK_GEN_MOVE.
+// 0: neither, 1: a ladder, 2: vines; pos: Link's position (+0x144).
+int player_climb(float pos[3]) {
+    if (!g_is_skyward_100) return 0;
+    const uint64_t p = *(const uint64_t *)(uintptr_t)PLAYER_PTR;
+    if (!heap_ptr(p) || (p & 7) || *(const uint64_t *)(uintptr_t)p != PLAYER_VTABLE) return 0;
+    const uint32_t f = *(const volatile uint32_t *)(uintptr_t)(p + 0x460);
+    const int kind = f & 0x20000 ? 1 : f & 0x10000 ? 2 : 0;
+    if (kind && pos) memcpy(pos, (const void *)(uintptr_t)(p + 0x144), 12);
+    return kind;
+}
+
 #define GAME_CAMERA_VIEW (MAIN_BASE + 0x2bfda90ull)
 
 // The boss door's key puzzle: from the A that examines the lock to the B that backs out (or the door opening), Link's

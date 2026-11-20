@@ -414,6 +414,26 @@ backflip when targeting takes it further - switched off altogether, those left t
 - **View:** the game doesn't update Link's eye point (main+0x1829a30) while he dowses - he walked 300-370 units from it
   and the view stayed behind - so his own position is the eye point throughout (`player.c`).
 
+### Grips and physical climbing (`runtime/vr/vr_input.c`, `runtime/hle/player.c`)
+
+- **Grips:** the grips are the hands' own (doors, climbing). The game's L / R are a grip squeezed while a stick click
+  is held; a click used so sends no stick press and doesn't open the settings menu (squeeze within the menu hold's
+  0.6 s). Log: `[vr] a stick click held with a grip: the grip is the game's L / R`.
+- **Climbing state:** Link's flags at his actor +0x460 - the decomp's `dAcPy_c::mActionFlags` (zeldaret/ss
+  `include/d/d_player_act.h`, Wii +0x364; HD's fields sit 0xfc later, its `mCurrentAction` Wii +0x36c being our
+  +0x468). `FLG0_ON_LADDDER` 0x20000, `FLG0_ON_VINES` 0x10000 (ivy). Seen in VR: `[climb] on ivy`.
+- **Climbing** (the design of [TPVR](https://github.com/JoeyAW/TPVR)'s, JoeyAW's Twilight Princess VR mod, CC0): a
+  squeezed grip (0.6 on, 0.4 off, the newest wins; a buzz) banks the hand's motion in the room as movement owed to his
+  body - pulled down is owed up; on ivy, sideways along the head reference's right too - capped at 75 units. Link's
+  own movement pays it off; with no hand holding it fades (0.5 s). The larger axis becomes the left stick (after the
+  stick's turn to the head): |bank| / 30, at least 0.35, past 6 units; below that the real stick is left alone. So the
+  game's own climbing - its rung steps, ends and wall checks - runs on it. `SKYRECOMP_VR_NO_CLIMB=1` turns it off;
+  `SKYRECOMP_CLIMB_LOG=1` logs the bank and the stick. Tested in VR.
+- **Held items while climbing:** no sword or shield is learned while he climbs or the Beetle flies, nor for 240 frames
+  after (`vr_rig.c` held_learn): climbing ivy had learned a 168-index "sword" and a 348-index "shield" from meshes by
+  his hands. Wrong entries in `vr_held_models.txt` (`<kind> <index count>` lines) can be deleted; real ones are
+  learned again.
+
 ### The boss door's key puzzle (`runtime/hle/player.c`, `vr_rig.c`)
 
 From the A that examines a boss door's lock to the B that backs out (or the door opening), Link's actor +0x9478 points
