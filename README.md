@@ -1,4 +1,4 @@
-> [AI DISCLOSURE]
+> [!AI DISCLOSURE]
 > This VR mod, and the recomps it's based on, is almost entirely vibecoded. We understand the stigma behind AI usage, and we respect those who do not wish to partake in it.
 >
 > This was not exactly our first choice for development. In fact, I tried putting up a monetary bounty for a barebones mod, but nobody was interested. Skyward Sword just isn't as interesting as, say, Twilight Princess (Thanks Joey!).
