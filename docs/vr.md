@@ -183,6 +183,14 @@ so forward walks where the player looks (or points). `SKYRECOMP_VR_SHOW_LINK=1` 
 eye point (Loftwing flight, where that point stops updating; far cinematic cameras) 1st person shows the 3rd-person
 view after 20 frames (a one-off camera cut doesn't switch it), and returns below 1000 units.
 
+Eye point left behind: in Eldin, after a short jump at the bottom of the incline to the volcano's gate, the view
+followed Link's animated head all the way up (bobbing, the sword and shield back on him, the Beetle's camera kept after
+it came back), as if the eye point (main+0x1829a30) had stayed where he jumped. While Link himself
+(*(main+0x2bf9940) +0x144) is more than 150 units across from the eye point for 90 frames running, his own position
+(+150 up) is the eye point until they are within 50 units again (`runtime/hle/player.c`, not in the sky's F02x
+stages, where the eye point waits while he rides his Loftwing). Tested in VR. Log: `[player] eye point left behind /
+caught up`; `[vr-rig] the view follows / leaves his animated head` marks the head-following itself.
+
 Swimming: the game keeps Link's eye point at the water surface, which would cut the view in half (and the water's
 screen-space reflection breaks into flat fans right at its plane). In water the eye point is more than 153 units above
 his feet (Link's actor +0x154; on land it is feet + 150, up to 151.2 measured) and holds perfectly still for 10

@@ -288,6 +288,11 @@ void vr_rig_begin_frame(void) {
                 g_scripted = w > 0.5f;
                 for (int i = 0; i < 3; i++) pos[i] += (g_head_world[i] + g_head_offset[i] - pos[i]) * w;
             }
+            static bool was_scripted;  // (rare; tells a scripted move from an eye point left behind - hle/player.c)
+            if (g_scripted != was_scripted)
+                fprintf(stderr, "[vr-rig] frame %llu: %s his animated head (%.0f units across from his eye point)\n",
+                        (unsigned long long)renderer_present_count(), g_scripted ? "the view follows" : "the view leaves", d);
+            was_scripted = g_scripted;
         }
     }
     if (have_eye && g_rig.have_game_view) {
