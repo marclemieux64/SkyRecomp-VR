@@ -131,6 +131,7 @@ std::vector<std::string> vr_lines() {
             "sword_swing_speed = " + swing_speed.str(),
             "sword_dir_leeway = " + dir_leeway.str(),
             std::string("physical_climbing = ") + (g_vr_config.physical_climbing ? "true" : "false"),
+            std::string("physical_sheathing = ") + (g_vr_config.physical_sheathing ? "true" : "false"),
             "snap_turn_angle = " + std::to_string((int)g_vr_config.snap_turn_angle),
             "smooth_turn_speed = " + std::to_string((int)g_vr_config.smooth_turn_speed),
             "camera_height_offset = " + height.str(), "camera_distance_offset = " + distance.str(),
@@ -189,6 +190,7 @@ extern "C" void LoadVRConfig(const char *filepath) {
         else if (key == "sword_swing_speed") parse_float(value, g_vr_config.sword_swing_speed);
         else if (key == "sword_dir_leeway") parse_float(value, g_vr_config.sword_dir_leeway);
         else if (key == "physical_climbing") parse_bool(value, g_vr_config.physical_climbing);
+        else if (key == "physical_sheathing") parse_bool(value, g_vr_config.physical_sheathing);
         else if (key == "snap_turn_angle") parse_float(value, g_vr_config.snap_turn_angle);
         else if (key == "smooth_turn_speed") parse_float(value, g_vr_config.smooth_turn_speed);
         else if (key == "camera_height_offset") parse_float(value, g_vr_config.camera_height_offset);

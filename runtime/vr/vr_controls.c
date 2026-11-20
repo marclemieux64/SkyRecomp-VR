@@ -289,6 +289,10 @@ bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
     if (!sensor || controllers_off() || !motion_joycon_mode() || !sky_joycon_sensor(device, &s)) return false;
     // (the right Joy-Con: an aimed item, the menu pointer, the sword)
     if (device == 1 && !aim_pointer(&s) && !panel_pointer(&s)) skyward_strike_assist(&s);
+    {   // (physical sheathing, vr_input.c: a grab over the shoulder draws the sword with a swing of the Joy-Con)
+        extern bool vr_input_draw_swing(float gyro[3], float accel[3]);
+        if (device == 1) vr_input_draw_swing(s.gyro, s.accel);
+    }
     memcpy(sensor, &s, sizeof s);
     return true;
 }

@@ -296,6 +296,79 @@ static void climb_update(SkyVrControllers *s) {
             bank[0], bank[1], stick[0], stick[1], drive ? "" : " (the real stick)");
 }
 
+// ---- Physical sheathing (VR Options > Physical Sheathing, opt-in; the design of TPVR's, JoeyAW, CC0): the sword is
+// over the right shoulder. The right hand there - in the head's level frame (yaw only, metres from between the eyes):
+// at most SHEATH_FWD in front, SHEATH_UP_LO..SHEATH_UP_HI up, SHEATH_SIDE_LO..SHEATH_SIDE_HI to the right; a little
+// more to leave it - squeezing the right grip while the sword is sheathed (vr_sword_sheathed, hle/vr_sword.c) draws it:
+// a swing of the right Joy-Con for SHEATH_SWING_NS (vr_input_draw_swing: the game draws its sword when the Joy-Con is
+// swung), a strong buzz. Letting go of the grip there while it is drawn - once the hand has left the spot since it was
+// drawn - puts it away: B for SHEATH_B_NS (the game's Put Away), a lighter buzz. Not while he climbs.
+// Log: [sheath] lines.
+#define SHEATH_FWD 0.10f
+#define SHEATH_UP_LO -0.30f
+#define SHEATH_UP_HI 0.30f
+#define SHEATH_SIDE_LO -0.05f
+#define SHEATH_SIDE_HI 0.40f
+#define SHEATH_MARGIN 0.08f
+#define SHEATH_SWING_NS 150000000ull
+#define SHEATH_B_NS 150000000ull
+static _Atomic uint64_t g_draw_swing_until;
+// (vr_controls.c, the right Joy-Con's sensor) a swing to draw the sword: gyro (rev/s about x y z) and acceleration (g)
+bool vr_input_draw_swing(float gyro[3], float accel[3]) {
+    if (SDL_GetTicksNS() >= atomic_load(&g_draw_swing_until)) return false;
+    gyro[0] = 3.0f, gyro[1] = 0, gyro[2] = 0;
+    accel[0] = 0, accel[1] = 3.0f, accel[2] = -1.0f;
+    return true;
+}
+static void sheath_update(SkyVrControllers *s) {
+    extern bool vr_head_pose(float q[4], float p[3]);
+    extern int vr_sword_sheathed(void), player_climb(float pos[3]);
+    static bool in_zone, armed = true, held;
+    static uint64_t b_until;
+    const uint64_t now = SDL_GetTicksNS();
+    if (now < b_until) s->buttons |= SKY_JC_B;
+    float q[4], head[3];
+    const SkyVrHand *h = &s->hand[1];
+    if (!g_vr_config.physical_sheathing || g_vr_config.view_mode != 1 || !s->active || !h->tracked ||
+        !vr_head_pose(q, head) || player_climb(NULL)) {
+        in_zone = held = false, armed = true;
+        return;
+    }
+    // (the head's forward, level: -z of its orientation; right: forward turned a quarter to the right)
+    float f[3] = {-2 * (q[0] * q[2] + q[3] * q[1]), 0, -(1 - 2 * (q[0] * q[0] + q[1] * q[1]))};
+    const float n = sqrtf(f[0] * f[0] + f[2] * f[2]);
+    if (n < 1e-3f) return;
+    f[0] /= n, f[2] /= n;
+    const float r[3] = {-f[2], 0, f[0]};
+    const float d[3] = {h->position[0] - head[0], h->position[1] - head[1], h->position[2] - head[2]};
+    const float fwd = d[0] * f[0] + d[2] * f[2], up = d[1], side = d[0] * r[0] + d[2] * r[2];
+    const float m = in_zone ? SHEATH_MARGIN : 0.0f;
+    const bool was_in = in_zone;
+    in_zone = fwd <= SHEATH_FWD + m && up >= SHEATH_UP_LO - m && up <= SHEATH_UP_HI + m && side >= SHEATH_SIDE_LO - m &&
+              side <= SHEATH_SIDE_HI + m;
+    if (in_zone && !was_in) haptic(1, 0.15f, 10);  // (a light tick: at the hilt)
+    if (!in_zone) armed = true;
+    const float g = g_grip[1];
+    const bool press = !held && g > 0.6f, release = held && g < 0.4f;
+    if (press) held = true;
+    if (release) held = false;
+    const int sheathed = vr_sword_sheathed();
+    if (press && in_zone && sheathed == 1) {
+        atomic_store(&g_draw_swing_until, now + SHEATH_SWING_NS);
+        armed = false;
+        haptic(1, 0.8f, 40);
+        LOG("[sheath] drawn from over the shoulder (hand %.2f forward, %.2f up, %.2f right of the head)\n", fwd, up, side);
+    } else if (release && in_zone && sheathed == 0 && armed) {
+        b_until = now + SHEATH_B_NS;
+        s->buttons |= SKY_JC_B;
+        haptic(1, 0.5f, 30);
+        LOG("[sheath] put away over the shoulder\n");
+    } else if ((press || release) && in_zone) {
+        LOG("[sheath] grip %s at the shoulder: sword %s%s\n", press ? "squeezed" : "let go",
+            sheathed == 1 ? "sheathed" : sheathed == 0 ? "drawn" : "unknown", armed ? "" : " (not since leaving the spot)");
+    }
+}
+
 // The settings menu / name entry on the VR panel (ui/menu.mm), from the controllers (after ShipWright VR):
 //  - holding the left stick click 0.6 s opens / closes the settings menu; a tap still reaches the game, as a short
 //    press when released (at press time a tap can't be told from the start of a hold);
@@ -485,7 +558,7 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         s.l = get_float(ACT_L);
         s.r = get_float(ACT_R);
         g_grip[0] = s.l, g_grip[1] = s.r;
-        if (g_vr_config.physical_climbing) {  // (the grips free: L / R only with a stick click held - see g_grip)
+        if (g_vr_config.physical_climbing || g_vr_config.physical_sheathing) {  // (the grips free: L / R only with a stick click held - see g_grip)
             const uint32_t clicks = SKY_JC_LSTICK | SKY_JC_RSTICK;
             const bool click = (s.buttons & clicks) != 0;
             if (!click) g_click_modifier = false;
@@ -556,6 +629,7 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         extern bool vr_world_menu_active(void);
         if (paused && vr_world_menu_active()) s.stick[0][0] = s.stick[0][1] = 0;
         if (!paused) climb_update(&s);  // (physical climbing: after the stick's turn - up the ladder is up)
+        if (!paused) sheath_update(&s);  // (physical sheathing: the sword over the right shoulder)
         // VR Options > Door Opening: at a door (Link's action 0x6a, hle/player.c), grab with a grip, turn the wrist at
         // least 90 degrees and pull the hand back 12 cm: A is pressed for the game, which plays its own door sequence
         // (the next room loads, the door closes behind him). Buzz on the grab and when the turn is far enough.

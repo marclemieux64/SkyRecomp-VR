@@ -16,6 +16,7 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **No slash trail, a steady view:** the game's white swoosh trail is hidden while the sword is in your hand, and the view no longer follows Link's head as he leans into a slash.
 - **Right stick up / down is the D-pad's up / down.**
 - **Physical climbing** (opt-in: VR Options > Physical Climbing; after [TPVR](https://github.com/JoeyAW/TPVR)'s, by JoeyAW): on a ladder or ivy, squeeze a grip and pull - down to climb up, sideways on ivy; the pull drives the game's own climbing. With it on, the grips are your hands': they no longer press the game's L / R - hold a stick click while squeezing for them (the click is then only a modifier: no stick press, no settings menu).
+- **Physical sheathing** (opt-in: VR Options > Physical Sheathing; after TPVR's): reach over your right shoulder and squeeze the right grip to draw the sword; let go of it there to put it away. It frees the grips like Physical Climbing.
 - Swords and shields are no longer learned from meshes by the hands while climbing.
 - **Aiming with the controller:** aimed items go where the right controller points.
 - **Slingshot:** a new Slingshot system shoots from the controller along where it points, following the game's own seed flight, with a 3D marker where the seed will land; the Slingshot model is held in the hand.

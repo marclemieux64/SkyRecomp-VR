@@ -108,6 +108,11 @@ typedef struct VRConfig {
         = false
 #endif
         ;                                // opt-in: grip and pull to climb (vr_input.c); the grips then aren't L / R
+    bool physical_sheathing
+#ifdef __cplusplus
+        = false
+#endif
+        ;                                // opt-in: grip over the right shoulder draws / puts away the sword (vr_input.c)
 } VRConfig;
 
 // Always contains a validated configuration. LoadVRConfig resets it to defaults first.

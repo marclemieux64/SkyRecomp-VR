@@ -912,6 +912,10 @@ static void tab_vr_options(void) {
     changed |= opt_toggle("Physical Climbing", &g_vr_config.physical_climbing, false,
                           "1st person, on a ladder or ivy: squeeze a grip and pull down to climb up (sideways on ivy). "
                           "The grips then no longer press L / R - hold a stick click while squeezing a grip for them.");
+    changed |= opt_toggle("Physical Sheathing", &g_vr_config.physical_sheathing, false,
+                          "1st person: reach over your right shoulder and squeeze the right grip to draw the sword; let go "
+                          "of it there to put it away. The grips then no longer press L / R - hold a stick click while "
+                          "squeezing a grip for them.");
     changed |= opt_toggle("Sword Hits Follow Your Hand", &g_vr_config.sword_hitbox, true,
                           "1st person: while the sword is drawn, what it hits is where the blade in your right hand is, "
                           "not where the game swings it.");

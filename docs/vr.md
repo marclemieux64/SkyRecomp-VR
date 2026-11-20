@@ -431,6 +431,13 @@ backflip when targeting takes it further - switched off altogether, those left t
   stick's turn to the head): |bank| / 30, at least 0.35, past 6 units; below that the real stick is left alone. So the
   game's own climbing - its rung steps, ends and wall checks - runs on it. `SKYRECOMP_VR_NO_CLIMB=1` turns it off;
   `SKYRECOMP_CLIMB_LOG=1` logs the bank and the stick. Tested in VR.
+- **Physical sheathing** (VR Options > Physical Sheathing, `[VR] physical_sheathing`, default off; also frees the
+  grips): the right hand over the right shoulder - in the head's level frame (`vr_head_pose`, `vr.c`: between the
+  eyes), at most 0.10 m in front, -0.30..0.30 m up, -0.05..0.40 m to the right, 0.08 m more to leave - with a light tick
+  on reaching it. Squeezing the right grip there while the sword is sheathed (`vr_sword_sheathed`) draws it: the
+  right Joy-Con is swung for 150 ms (`vr_input_draw_swing`, read in `vr_controls.c`: 3 rev/s about x, 3 g), as the game
+  draws its sword when the Joy-Con is swung. Letting go there while it is drawn, once the hand has left the spot since,
+  puts it away: B for 150 ms (the game's Put Away). Not while climbing. Log: `[sheath]`. Tested in VR.
 - **Held items while climbing:** no sword or shield is learned while he climbs or the Beetle flies, nor for 240 frames
   after (`vr_rig.c` held_learn): climbing ivy had learned a 168-index "sword" and a 348-index "shield" from meshes by
   his hands. Wrong entries in `vr_held_models.txt` (`<kind> <index count>` lines) can be deleted; real ones are
