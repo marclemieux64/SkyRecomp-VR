@@ -52,6 +52,9 @@ bool game_camera_view(float view[12]);  // runtime/hle/player.c: the game camera
 #define LINK_HEAD_ATTACHED_SWORD 60.0f
 #define LINK_EYE_PART_MAX_VERTS 96
 #define LINK_EYE_PART_RADIUS 12.0f
+#define LINK_EYE_HEAD_RADIUS 20.0f  // (around his eyes as his head has them: the offset is kept in world axes, so a
+                                    // turned or tilted head moves them a little from it)
+#define LINK_HEAD_PART_RADIUS 30.0f  // (tiny meshes this close to his head's centre - his face's bones: bits of his head)
 #define LINK_BELT_RADIUS 18.0f
 #define LINK_MESH_CACHE 64
 // Swimming: the game keeps the eye point at the water surface (even while Link dives), which cuts the view in half.
@@ -763,6 +766,7 @@ static bool link_piece_excluded(uint64_t count, uint64_t vb_size) {
 }
 #define LINK_PIECE_MIN_COUNT 24  // (smaller: quads, glints, effects - shared by much of the world; not learnt)
 #define LINK_JOINT_MAX_COUNT 48  // (on the same joint as a piece of his: only meshes this small - the bits by his head)
+#define LINK_JOINT_BLOCKS 32     // (the joints of his pieces drawn this frame and the last, remembered for those bits)
 
 static void link_piece_seen(uint64_t hash, uint64_t count, uint64_t size, const float off[3]) {
     if (!hash || count < LINK_PIECE_MIN_COUNT || known_link_mesh(hash, count, size) || not_link_mesh(hash, count, size)) return;
@@ -1887,7 +1891,18 @@ bool vr_rig_held_draw(const float *slot0, uint64_t size0, uint64_t count) {
     float e[3];
     for (int r = 0; r < 3; r++) e[r] = v[r * 4] * g_rig.link[0] + v[r * 4 + 1] * g_rig.link[1] + v[r * 4 + 2] * g_rig.link[2] + v[r * 4 + 3];
     const float ex = m[3] - e[0], ey = m[7] - e[1], ez = m[11] - e[2];
-    if (ex * ex + ey * ey + ez * ez > HELD_HIDE * HELD_HIDE) return false;
+    if (ex * ex + ey * ey + ez * ez > HELD_HIDE * HELD_HIDE) {
+        // (or that close to his head as it is drawn: running, his body leans and bobs away from the eye point - his back
+        // with it - and the sword and shield came back into view now and then)
+        if (!g_head_frame || g_head_frame + 1 < now) return false;
+        float h2 = 0;
+        for (int i = 0; i < 3; i++) {  // (the item in the world, R^T (m - t), against his head there)
+            const float d = v[0 * 4 + i] * (m[3] - v[3]) + v[1 * 4 + i] * (m[7] - v[7]) + v[2 * 4 + i] * (m[11] - v[11]) -
+                            g_head_world[i];
+            h2 += d * d;
+        }
+        if (h2 > HELD_HIDE * HELD_HIDE) return false;
+    }
     int k = held_kind(count);
     if (k >= 0) g_held_back[k] = now;  // (the item itself, at his back)
     else {
@@ -2160,8 +2175,8 @@ bool vr_rig_is_link_draw(const float *slot0, uint64_t size0, const float *bones,
         }
         {   // (on the same joint as a piece of his drawn this frame or the last: his too, however small - the bits next
             // to his head drawn with the pieces there)
-            static float blocks[8][12];
-            static uint64_t block_frame[8];
+            static float blocks[LINK_JOINT_BLOCKS][12];  // (enough for all of his pieces in a frame: with 8, a run drew
+            static uint64_t block_frame[LINK_JOINT_BLOCKS];  // more of them between one and its bits, which were then shown)
             static int nb;
             extern uint64_t renderer_present_count(void);
             const uint64_t now = renderer_present_count() + 1;
@@ -2179,11 +2194,11 @@ bool vr_rig_is_link_draw(const float *slot0, uint64_t size0, const float *bones,
             // lines, 2026-11-10)
             bool plain = g_rig.have_game_view;
             for (int j = 0; plain && j < 12; j++) plain = fabsf(m[j] - g_rig.game_view[j]) <= 1e-3f * (1.0f + fabsf(m[j]));
-            if (!plain) memcpy(blocks[nb], m, sizeof blocks[nb]), block_frame[nb] = now, nb = (nb + 1) % 8;
+            if (!plain) memcpy(blocks[nb], m, sizeof blocks[nb]), block_frame[nb] = now, nb = (nb + 1) % LINK_JOINT_BLOCKS;
             return true;  // (a piece of his, wherever his body has it now)
         }
         // (only the tiny bits it was for - next to his head, 6 and 12 indices - and not remembered: hidden this frame)
-        for (int b = 0; b < 8 && count <= LINK_JOINT_MAX_COUNT; b++) {
+        for (int b = 0; b < LINK_JOINT_BLOCKS && count <= LINK_JOINT_MAX_COUNT; b++) {
             if (!block_frame[b] || block_frame[b] + 1 < now) continue;
             bool same = true;
             for (int j = 0; same && j < 12; j++) same = fabsf(m[j] - blocks[b][j]) <= 1e-4f * (1.0f + fabsf(m[j]));
@@ -2208,7 +2223,33 @@ bool vr_rig_is_link_draw(const float *slot0, uint64_t size0, const float *bones,
         // His eyes (tiny, at the eye point) and his belt's rigid pieces (measured: 12 and 216 vertices, 27 and 48 units
         // below the eye point): on his centre line, between chest and knees - part of his body. (His hands hang ~25
         // units to the sides.)
-        const bool eyes = count <= LINK_EYE_PART_MAX_VERTS && dx * dx + dy * dy + dz * dz < LINK_EYE_PART_RADIUS * LINK_EYE_PART_RADIUS;
+        bool eyes = count <= LINK_EYE_PART_MAX_VERTS && dx * dx + dy * dy + dz * dz < LINK_EYE_PART_RADIUS * LINK_EYE_PART_RADIUS;
+        if (!eyes && count <= LINK_EYE_PART_MAX_VERTS) {
+            // (or tiny bits of his head where his animated head has them: a swing, a roll, a jump or a run moves his head
+            // - and his eyes, the bits at his ears - off the eye point, and slivers of them were left shown)
+            extern uint64_t renderer_present_count(void);
+            if (g_head_frame && g_head_frame + 1 >= renderer_present_count() + 1) {
+                float d2 = 0, c2 = 0;  // (from his eyes as his head has them; from his head's centre)
+                for (int i = 0; i < 3; i++) {
+                    const float c = g_rig.link[i] + w[i] - g_head_world[i];
+                    const float d = c - (g_head_offset_ok ? g_head_offset[i] : 0.0f);
+                    d2 += d * d, c2 += c * c;
+                }
+                eyes = (g_head_offset_ok && d2 < LINK_EYE_HEAD_RADIUS * LINK_EYE_HEAD_RADIUS) ||
+                       c2 < LINK_HEAD_PART_RADIUS * LINK_HEAD_PART_RADIUS;
+                static uint64_t said[16];
+                static int ns;
+                const uint64_t h = hash ^ count;
+                bool seen = false;
+                for (int i = 0; i < ns; i++) seen |= said[i] == h;
+                if (eyes && !seen && ns < 16) {
+                    said[ns++] = h;
+                    fprintf(stderr, "[link-log] at his head as it is drawn (%.0f from the eye point, %.0f from his head's "
+                            "centre): hidden, %llu indices, vb %llu bytes\n", sqrtf(dx * dx + dy * dy + dz * dz), sqrtf(c2),
+                            (unsigned long long)count, (unsigned long long)vb_size);
+                }
+            }
+        }
         const bool belt = w[0] * w[0] + w[2] * w[2] < LINK_BELT_RADIUS * LINK_BELT_RADIUS && w[1] < -15.0f && w[1] > -110.0f;
         // (learnt from a wider place - his hips, back, pouches - but hidden there only once it moved with him)
         const float r2 = w[0] * w[0] + w[2] * w[2];
