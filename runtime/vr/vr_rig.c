@@ -1659,6 +1659,13 @@ static void held_learn(const float *m, uint64_t count, uint64_t now) {
         // 2026-11-14, filling the list.)
         const int hk = s == 1 ? 0 : 1;
         if (g_held[hk].side == s && g_held[hk].frame && g_held[hk].frame + HELD_MEMORY >= now) continue;
+        // (a sword only while the game has the sword out, hle/vr_sword.c: 2026-11-21 a bomb in his right hand, 168,
+        // was learned as a sword, and the real sword was left to the game since)
+        // A shield only while it is raised (the same: the Adventure Pouch, 348, was learned as a shield and drawn on
+        // the left hand in its place now and then).
+        extern int vr_sword_sheathed(void);
+        extern bool vr_shield_raised(void);
+        if (s == 1 ? vr_sword_sheathed() != 0 : !vr_shield_raised()) continue;
         const float dx = m[3] - g_hand_game[s][3], dy = m[7] - g_hand_game[s][7], dz = m[11] - g_hand_game[s][11];
         const float reach = s == 1 ? HELD_REACH : HELD_REACH_SHIELD;  // (side 1: his right hand - the sword's)
         if (dx * dx + dy * dy + dz * dz > reach * reach) continue;

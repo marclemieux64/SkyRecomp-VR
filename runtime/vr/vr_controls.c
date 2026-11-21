@@ -270,7 +270,12 @@ bool vr_joycon_state(VrJoyConState *state) {
 // Skyward Strike asks for a nearly upright, steady Joy-Con. Real VR grips have controller-specific pitch offsets
 // and considerably more resting jitter than a calibrated Joy-Con. Once the sword is already raised mostly upward,
 // report the intended cardinal pose and remove only low-rate jitter; swings below this cone remain completely raw.
+// Only with the sword out (vr_sword_sheathed() == 0, hle/vr_sword.c): anything else held up - a bomb, before an
+// overhand throw - was sent as that still, upright pose with gravity only, and the game's throw / roll gesture lost its
+// wind-up (throws taken as rolls and back, swings ignored - user 2026-11-21, SKYRECOMP_BOMB_LOG).
 static void skyward_strike_assist(SkyJoyConSensor *s) {
+    extern int vr_sword_sheathed(void);
+    if (vr_sword_sheathed() != 0) return;
     if (s->direction[5] < 0.72f) return;  // Joy-Con +Y follows the controller's pointing axis.
     float x = s->direction[0], y = s->direction[1];
     const float n = sqrtf(x * x + y * y);
@@ -311,6 +316,35 @@ bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
         if (device == 1) vr_input_draw_swing(s.gyro, s.accel);
         extern bool vr_input_shield_flick(float gyro[3], float accel[3]);  // (the left grip raising the shield)
         if (device == 0) vr_input_shield_flick(s.gyro, s.accel);
+    }
+    {   // (diagnostics: SKYRECOMP_BOMB_LOG=1 - Link's action and flags as they change, and the right Joy-Con's motion
+        // sent to the game: its peaks since the last line, and 10 lines a second while it turns fast)
+        static int log = -1;
+        if (log < 0) log = getenv("SKYRECOMP_BOMB_LOG") != NULL;
+        if (log && device == 1) {
+            extern int player_link_action(void);
+            extern uint32_t player_link_flags(void);
+            static int last_action = -2;
+            static uint32_t last_flags;
+            static float peak_g, peak_a;
+            static uint64_t next;
+            const float g = sqrtf(s.gyro[0] * s.gyro[0] + s.gyro[1] * s.gyro[1] + s.gyro[2] * s.gyro[2]);
+            const float a = sqrtf(s.accel[0] * s.accel[0] + s.accel[1] * s.accel[1] + s.accel[2] * s.accel[2]);
+            peak_g = fmaxf(peak_g, g), peak_a = fmaxf(peak_a, a);
+            const int action = player_link_action();
+            const uint32_t flags = player_link_flags();
+            const uint64_t now = SDL_GetTicksNS();
+            if (action != last_action || flags != last_flags) {
+                LOG("[bomb-log] action %#x flags %08x (was %#x %08x) | since: gyro peak %.2f accel peak %.2f\n", action,
+                    flags, last_action, last_flags, peak_g, peak_a);
+                last_action = action, last_flags = flags, peak_g = peak_a = 0;
+            }
+            if (g > 0.5f && now >= next) {
+                next = now + 100000000ull;
+                LOG("[bomb-log] motion gyro %.2f %.2f %.2f accel %.2f %.2f %.2f dir-y %.2f %.2f %.2f\n", s.gyro[0], s.gyro[1],
+                    s.gyro[2], s.accel[0], s.accel[1], s.accel[2], s.direction[3], s.direction[4], s.direction[5]);
+            }
+        }
     }
     memcpy(sensor, &s, sizeof s);
     return true;
