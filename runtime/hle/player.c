@@ -166,6 +166,20 @@ int player_climb(float pos[3]) {
     return kind;
 }
 
+// (runtime/vr/vr_controls.c, physical sheathing) Link with nothing in use - where a swing of the Joy-Con would only draw
+// the sword: the same flags (+0x460), none of FLG0_USE_ITEM_0/1/2 (0x40000000, 0x20000000, 0x04000000: set while
+// dowsing, measured), FLG0_HANGING_ITEM 0x800, FLG0_IN_WATER 0x40000, ladder / vines 0x30000, FLG0_CRAWLING 0x1000000,
+// the ropes 0xc00000; not in the sky (F02x: the Loftwing). (FLG0_ON_FOOT 0x80000000 was required at first: walking
+// and running clear it, and a swing then drew the sword again - user 2026-11-20.)
+bool player_bare_on_foot(void) {
+    if (!g_is_skyward_100) return false;
+    const uint64_t p = *(const uint64_t *)(uintptr_t)PLAYER_PTR;
+    if (!heap_ptr(p) || (p & 7) || *(const uint64_t *)(uintptr_t)p != PLAYER_VTABLE) return false;
+    if (!memcmp((const void *)(uintptr_t)(MAIN_BASE + 0x2bf98d8ull), "F02", 3)) return false;
+    const uint32_t f = *(const volatile uint32_t *)(uintptr_t)(p + 0x460);
+    return !(f & (0x40000000u | 0x20000000u | 0x04000000u | 0x800u | 0x40000u | 0x30000u | 0x1000000u | 0xc00000u));
+}
+
 #define GAME_CAMERA_VIEW (MAIN_BASE + 0x2bfda90ull)
 
 // The boss door's key puzzle: from the A that examines the lock to the B that backs out (or the door opening), Link's

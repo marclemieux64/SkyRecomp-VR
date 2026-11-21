@@ -416,11 +416,21 @@ backflip when targeting takes it further - switched off altogether, those left t
 
 ### Grips and physical climbing (`runtime/vr/vr_input.c`, `runtime/hle/player.c`)
 
-- **Opt-in:** VR Options > Physical Climbing (`[VR] physical_climbing`, default off). Off, the grips are the game's
-  L / R as before and nothing below runs.
-- **Grips:** with it on, the grips are the hands' own (doors, climbing). The game's L / R are a grip squeezed while a
-  stick click is held; a click used so sends no stick press and doesn't open the settings menu (squeeze within the menu hold's
-  0.6 s). Log: `[vr] a stick click held with a grip: the grip is the game's L / R`.
+- **Opt-in:** VR Options > Experimental: Physical Climbing (`[VR] physical_climbing`) and Physical Sheathing
+  (`[VR] physical_sheathing`), both default off. With both off, the grips are the game's L / R as before and nothing
+  below runs.
+- **Grips** (either on, 1st person: `vr_grips_free`): the grips are the hands' own (doors, climbing, the sword, the
+  shield). The game's L / R are a grip squeezed while a stick click is held; a click used so sends no stick press and
+  doesn't open the settings menu (squeeze within the menu hold's 0.6 s). Log: `[vr] a stick click held with a grip:
+  the grip is the game's L / R`.
+- **Shield** (`shield_update`, `JoyConTranslator.cpp`): a flick of the Joy-Con (L) raises the shield (Link's action
+  0x49), and the hand's ordinary motion raised it by accident (VR log: 0 -> 0x49 -> 0 with no thrust). So the left
+  Joy-Con is held still - no turning, gravity only - while the grips are free or the shield is up, and its motion goes
+  through for 0.15 s only after a deliberate thrust with the shield up (forward along where it points, over
+  `SKYRECOMP_VR_BASH_SPEED` m/s, 1.5: a bash) or a swing of both hands at once (each over 1.5 m/s: a spin attack).
+  Squeezing the left grip sends one flick (120 ms, `vr_input_shield_flick`, read in `vr_controls.c`) - once a squeeze:
+  sent again while held, each was another bash. Logs: `[shield]`, `[bash]`. `SKYRECOMP_LINK_ACTION_LOG=1` logs each
+  change of Link's action (+0x468).
 - **Climbing state:** Link's flags at his actor +0x460 - the decomp's `dAcPy_c::mActionFlags` (zeldaret/ss
   `include/d/d_player_act.h`, Wii +0x364; HD's fields sit 0xfc later, its `mCurrentAction` Wii +0x36c being our
   +0x468). `FLG0_ON_LADDDER` 0x20000, `FLG0_ON_VINES` 0x10000 (ivy). Seen in VR: `[climb] on ivy`.
@@ -436,8 +446,12 @@ backflip when targeting takes it further - switched off altogether, those left t
   eyes), at most 0.10 m in front, -0.30..0.30 m up, -0.05..0.40 m to the right, 0.08 m more to leave - with a light tick
   on reaching it. Squeezing the right grip there while the sword is sheathed (`vr_sword_sheathed`) draws it: the
   right Joy-Con is swung for 150 ms (`vr_input_draw_swing`, read in `vr_controls.c`: 3 rev/s about x, 3 g), as the game
-  draws its sword when the Joy-Con is swung. Letting go there while it is drawn, once the hand has left the spot since,
-  puts it away: B for 150 ms (the game's Put Away). Not while climbing. Log: `[sheath]`. Tested in VR.
+  draws its sword when the Joy-Con is swung. It stays out only while the grip is held: once it is out under the grip,
+  letting go anywhere puts it away - B for 150 ms (the game's Put Away), again every 300 ms until the game has it
+  sheathed; not in a spin attack or while dowsing. A swing doesn't draw it: while it is sheathed and Link has nothing
+  in use (`player_bare_on_foot`, `player.c`: none of the use-item, hanging, water, climbing, crawling or rope flags;
+  not in the sky), the right Joy-Con is held still (gravity only, its pointing kept). Not while climbing. Log:
+  `[sheath]`. Tested in VR.
 - **Held items while climbing:** no sword or shield is learned while he climbs or the Beetle flies, nor for 240 frames
   after (`vr_rig.c` held_learn): climbing ivy had learned a 168-index "sword" and a 348-index "shield" from meshes by
   his hands. Wrong entries in `vr_held_models.txt` (`<kind> <index count>` lines) can be deleted; real ones are
