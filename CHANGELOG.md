@@ -26,6 +26,8 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **Dowsing:** it dowses where the blade in your right hand points, and its ring (with its glow) floats over the sword's gem instead of sitting on the flat HUD; the view stays with Link while he walks dowsing (the game stops updating his eye point then).
 - **No stuck head-cam:** where the game stops updating Link's eye point (a short jump at the foot of Eldin's incline to the volcano's gate), his own position takes over, so the view no longer bobs with his head, the sword and shield stay on the controllers, and the Beetle's camera comes back.
 - **Boss-key puzzle:** while you examine a boss door's lock and turn the key, the view switches to the game's own close-up of the key and the lock, and returns to 1st person when you back out or the door opens.
+- **Cutscene Camera** (VR Options, on by default): cutscenes play from the game's own camera, and 1st person comes back when they end. Z-targeting, which shows the same letterbox bars, stays in 1st person.
+- **Recentred on the game's camera:** whenever 1st person switches to the game's camera (a cutscene, the Beetle, the boss lock), the view is recentred, so the shot starts in front of you whichever way you had turned.
 
 ### Rendering
 - **Culling follows the headset:** objects are culled against the eyes' view, and their draw distance is measured along where you look.

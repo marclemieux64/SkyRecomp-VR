@@ -942,6 +942,9 @@ static void tab_vr_options(void) {
 
     changed |= opt_toggle("Level Horizon", &g_vr_config.level_horizon, true,
                           "Keeps the VR horizon level when the game camera rolls or tilts.");
+    changed |= opt_toggle("Cutscene Camera", &g_vr_config.cutscene_camera, true,
+                          "1st person: during cutscenes the view leaves Link's eyes for the game's own camera, and "
+                          "returns to 1st person when the cutscene ends. Off: cutscenes stay in 1st person.");
     changed |= opt_slider("Camera Height", &g_vr_config.camera_height_offset, -50.0f, 50.0f, 5.0f, 0.0f, "%+g",
                           "Raises or lowers your viewpoint, in game units (about a centimetre each). In 1st person this "
                           "adjusts Link's eye height.");

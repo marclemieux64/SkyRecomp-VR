@@ -793,6 +793,10 @@ bool vr_frame_begin(void) {
         }
     }
     vr_rig_begin_frame();
+    {   // (1st person just gave way to the game's camera - a cutscene: recentred on it, vr_rig.c)
+        extern bool vr_rig_take_recenter(void);
+        if (vr_rig_take_recenter()) vr_recenter();
+    }
     if (frame.stereo) update_cull();
     set_stage(STAGE_RENDER);
     return frame.stereo;

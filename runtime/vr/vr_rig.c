@@ -29,6 +29,16 @@ bool game_camera_view(float view[12]);  // runtime/hle/player.c: the game camera
 #define THEATRE_ENTER 1500.0f
 #define THEATRE_LEAVE 1000.0f
 #define THEATRE_FRAMES 20  // frames the camera must stay far before switching
+// A cutscene: its letterbox bars drawn (exec.c hud_letterbox_bar - the frame they were last seen); it lasts until they
+// have been gone this many frames (a camera cut or a fade between shots)
+#define CUTSCENE_HOLD_FRAMES 15
+static _Atomic bool g_recenter_request;  // (vr_rig_begin_frame: 1st person left for the game's camera)
+#define CUTSCENE_AFTER_ZL 90  // (frames after ZL is let go that the bars are still targeting's: they fold away in ~30)
+static _Atomic uint64_t g_letterbox_frame;
+void vr_rig_letterbox_seen(void) {
+    extern uint64_t renderer_present_count(void);
+    atomic_store(&g_letterbox_frame, renderer_present_count());
+}
 // A skinned draw is Link's when one of its bones lies this close to his eye point (measured: a few units standing,
 // up to ~100 swimming / jumping, where the eye point stays at floor + 150; other characters' nearest bones stayed
 // 150+ away).
@@ -317,6 +327,26 @@ void vr_rig_begin_frame(void) {
     //  - the Beetle in flight: its camera follows it - until it is caught (SKYRECOMP_VR_BEETLE_FP=1 stays in 1st person);
     //  - the boss door's key puzzle: its close-up of the key and the lock - until he backs out or the door opens
     //    (SKYRECOMP_VR_BOSS_LOCK_FP=1 stays in 1st person).
+    //  - a cutscene (VR Options > Cutscene Camera): while its letterbox bars are drawn (exec.c) - their slide in and
+    //    out included. Not while you target with ZL, nor while the bars fold away after it: targeting draws the same
+    //    bars (and Link's actor looks the same in a cutscene as standing about - measured 2026-11-20).
+    {
+        extern uint64_t renderer_present_count(void), input_zl_frame(void);
+        const uint64_t seen = atomic_load(&g_letterbox_frame), zl = input_zl_frame(), now = renderer_present_count();
+        const bool targeting = zl && zl + CUTSCENE_AFTER_ZL >= now;
+        const bool cutscene = have_eye && g_vr_config.cutscene_camera && seen && !targeting &&
+                              seen + CUTSCENE_HOLD_FRAMES >= now;
+        static bool was, cutscene_theatre;
+        if (cutscene != was)
+            fprintf(stderr, "[vr-rig] frame %llu: %s\n", (unsigned long long)renderer_present_count(),
+                    cutscene ? "a cutscene: the game's camera" : "the cutscene over: 1st person again");
+        was = cutscene;
+        if (cutscene) theatre = true, cutscene_theatre = true;
+        else if (cutscene_theatre) {
+            if (camera_distance < THEATRE_ENTER) theatre = false;
+            cutscene_theatre = false;
+        }
+    }
     {
         extern bool player_beetle_flying(void), player_boss_lock(void);
         static int keep_beetle = -1, keep_lock = -1;
@@ -395,8 +425,17 @@ void vr_rig_begin_frame(void) {
         last_seen = g_memory_seen_before;
         last_mode = mode;
     }
+    // (1st person -> the game's camera - a cutscene, the Beetle, the boss lock, a far camera: recentred, so the game's
+    // shot is in front of you whichever way you had turned; vr.c vr_rig_take_recenter)
+    if (g_rig.mode == 1 && mode != 1 && have_eye && theatre) {
+        atomic_store(&g_recenter_request, true);
+        fprintf(stderr, "[vr-rig] frame %llu: 1st person -> the game's camera: recentred\n",
+                (unsigned long long)renderer_present_count());
+    }
     g_rig.mode = mode;
 }
+
+bool vr_rig_take_recenter(void) { return atomic_exchange(&g_recenter_request, false); }
 
 void vr_rig_current_anchor(VrRigAnchor *a, const float *game_view) {
     if (g_rig.mode == 1) {
