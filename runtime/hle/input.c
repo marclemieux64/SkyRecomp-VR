@@ -604,6 +604,11 @@ void input_frame(uint64_t frame) {
 
 extern bool menu_input_captured(void);  // runtime/ui/menu.mm: overlay menu or name entry up (it has the keys / pad)
 
+// The buttons last given to the game (fill_state), VR controllers included; and the present frame ZL was last among
+// them (vr_rig.c, Cutscene Camera: targeting with ZL draws the same letterbox bars as a cutscene).
+static _Atomic uint64_t g_zl_frame;
+uint64_t input_zl_frame(void) { return atomic_load(&g_zl_frame); }
+
 // Buttons held right now (keyboard, gamepad, test script), independent of whether the game polls (movies).
 uint64_t input_buttons_now(void) { return (menu_input_captured() ? 0 : key_buttons | pad_buttons) | script_buttons; }
 
@@ -810,6 +815,10 @@ static void fill_state(Cpu *c, uint32_t attributes) {
     if (rx > 16000) b |= 1ull << 22;
     if (ry < -16000) b |= 1ull << 23;
     *(uint64_t *)(s + 8) = b;
+    if (b & (1ull << BTN_ZL)) {
+        extern uint64_t renderer_present_count(void);
+        atomic_store(&g_zl_frame, renderer_present_count());
+    }
     static uint64_t last_b;
     if (b != last_b && getenv("LARECOMP_INPUT") && !getenv("LARECOMP_INPUT_QUIET")) LOG("[input] id %#x buttons %#llx (sampling %lld, lr %llx)\n", id, (unsigned long long)b, (long long)sampling, c->x[30]);
     last_b = b;

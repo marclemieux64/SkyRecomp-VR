@@ -4050,6 +4050,14 @@ static bool hud_letterbox_bar(void) {
     return xr - xl > 2.2f && xl <= -1.0f && xr >= 1.0f && yt - yb < 0.35f && (yt >= 0.98f || yb <= -0.98f);
 }
 
+// (the bar above) its height on screen (NDC; 2 is the whole screen). Outside cutscenes the game keeps drawing both
+// bars, folded away to no height (measured headset-free: 0.00 every frame of a walk); a cutscene slides them in.
+static float hud_letterbox_height(void) {
+    const float *f = (const float *)(uintptr_t)st.ubuf[0][0].addr;
+    return fabsf(f[5] * f[21]);
+}
+#define LETTERBOX_CUTSCENE_HEIGHT 0.02f  // (taller than this: a cutscene's bar, sliding in or there)
+
 // A 2D quad over the whole screen (a fade to / from black or white, a flash): drawn in the eyes rather than on the
 // HUD panel, it covers the whole view - on the panel it is a coloured rectangle floating in a world left unfaded.
 static bool hud_fullscreen_quad(void) {
@@ -4297,6 +4305,12 @@ static void draw(CmdRec *r, bool indexed) {
     PROF_T0();
     g_hud_rec = r;
     g_hud_candidate = vk_hud_layer_on() && st.program && (hud_clear_for_frame(), !hud_full2d()) && is_hud_draw();
+    // (a cutscene plays: vr_rig.c gives the view to the game's camera - VR Options > Cutscene Camera. Whether or not
+    // the bar is taken for the HUD: in VR, in the headset, they weren't - measured at a gate's cutscene)
+    if (vr_stereo_active() && st.program && hud_letterbox_bar() && hud_letterbox_height() > LETTERBOX_CUTSCENE_HEIGHT) {
+        extern void vr_rig_letterbox_seen(void);
+        vr_rig_letterbox_seen();
+    }
     if (g_hud_candidate && hud_letterbox_bar()) {
         g_hud_candidate = false;
         stat_skipped++;

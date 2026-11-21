@@ -183,6 +183,19 @@ so forward walks where the player looks (or points). `SKYRECOMP_VR_SHOW_LINK=1` 
 eye point (Loftwing flight, where that point stops updating; far cinematic cameras) 1st person shows the 3rd-person
 view after 20 frames (a one-off camera cut doesn't switch it), and returns below 1000 units.
 
+Cutscene Camera (VR Options, on by default; `cutscene_camera` in `[VR]`): a cutscene hands 1st person to the game's
+camera (theatre) and back. The sign is the letterbox bars (`exec.c` `hud_letterbox_bar`): the game draws both bars on
+every frame, folded to no height outside cutscenes, and slides them in to 0.13 of the screen (NDC) in one (measured at
+a gate's cutscene). Taller than 0.02, a bar marks the frame (`vr_rig_letterbox_seen`); the cutscene lasts until no
+such bar has been drawn for 15 frames. In VR the bars aren't always taken for the HUD, so the check runs on every 2D
+draw. Z-targeting draws the same bars, and Link's actor looks the same in a cutscene as standing about (his action
+and flags at +0x460..+0x468), so the bars don't count while ZL is among the buttons given to the game
+(`hle/input.c` `input_zl_frame`, VR controllers included) or for 90 frames after, while they fold away.
+Whenever 1st person gives way to the game's camera (a cutscene, the Beetle, the boss lock, a far camera), the view
+is recentred (`vr_rig_take_recenter` -> `vr_recenter`): the shot starts in front of you, the HUD panel with it. Log:
+`[vr-rig] a cutscene: the game's camera` / `the cutscene over: 1st person again` / `1st person -> the game's camera:
+recentred`.
+
 Eye point left behind: in Eldin, after a short jump at the bottom of the incline to the volcano's gate, the view
 followed Link's animated head all the way up (bobbing, the sword and shield back on him, the Beetle's camera kept after
 it came back), as if the eye point (main+0x1829a30) had stayed where he jumped. While Link himself
