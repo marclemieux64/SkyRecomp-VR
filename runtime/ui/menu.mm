@@ -909,13 +909,6 @@ static void tab_vr_options(void) {
     changed |= opt_choice("Door Opening", &g_vr_config.door_mode, door_modes, 3, 0,
                           "At a door: grab the handle with a grip, turn your wrist a quarter turn and pull it towards "
                           "you to open it. Gesture only ignores the A button at doors; Button only turns the gesture off.");
-    changed |= opt_toggle("Physical Climbing", &g_vr_config.physical_climbing, false,
-                          "1st person, on a ladder or ivy: squeeze a grip and pull down to climb up (sideways on ivy). "
-                          "The grips then no longer press L / R - hold a stick click while squeezing a grip for them.");
-    changed |= opt_toggle("Physical Sheathing", &g_vr_config.physical_sheathing, false,
-                          "1st person: reach over your right shoulder and squeeze the right grip to draw the sword; let go "
-                          "of it there to put it away. The grips then no longer press L / R - hold a stick click while "
-                          "squeezing a grip for them.");
     changed |= opt_toggle("Sword Hits Follow Your Hand", &g_vr_config.sword_hitbox, true,
                           "1st person: while the sword is drawn, what it hits is where the blade in your right hand is, "
                           "not where the game swings it.");
@@ -949,6 +942,9 @@ static void tab_vr_options(void) {
 
     changed |= opt_toggle("Level Horizon", &g_vr_config.level_horizon, true,
                           "Keeps the VR horizon level when the game camera rolls or tilts.");
+    changed |= opt_toggle("Cutscene Camera", &g_vr_config.cutscene_camera, true,
+                          "1st person: during cutscenes the view leaves Link's eyes for the game's own camera, and "
+                          "returns to 1st person when the cutscene ends. Off: cutscenes stay in 1st person.");
     changed |= opt_slider("Camera Height", &g_vr_config.camera_height_offset, -50.0f, 50.0f, 5.0f, 0.0f, "%+g",
                           "Raises or lowers your viewpoint, in game units (about a centimetre each). In 1st person this "
                           "adjusts Link's eye height.");
@@ -962,6 +958,19 @@ static void tab_vr_options(void) {
                                    "Your current head position and facing become the centre (1st person: facing Link's "
                                    "direction again). SteamVR's own recenter does the same."))
         vr_recenter();
+
+    // (physical interactions after TPVR's - still being tuned: off by default. Either one frees the grips)
+    opt_section("Experimental");
+    changed |= opt_toggle("Physical Climbing", &g_vr_config.physical_climbing, false,
+                          "1st person, on a ladder or ivy: squeeze a grip and pull down to climb up (sideways on ivy). "
+                          "Like Physical Sheathing, it frees the grips: they no longer press L / R (hold a stick click "
+                          "while squeezing a grip for them), the left grip raises the shield and a flick of the left hand "
+                          "doesn't.");
+    changed |= opt_toggle("Physical Sheathing", &g_vr_config.physical_sheathing, false,
+                          "1st person: reach over your right shoulder and squeeze the right grip to draw the sword; it stays "
+                          "out while you hold the grip and is put away when you let go. A swing no longer draws it. Like "
+                          "Physical Climbing, it frees the grips: they no longer press L / R (hold a stick click while "
+                          "squeezing a grip for them), the left grip raises the shield and a flick of the left hand doesn't.");
 
     opt_end();
 

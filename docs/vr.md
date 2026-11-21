@@ -183,6 +183,19 @@ so forward walks where the player looks (or points). `SKYRECOMP_VR_SHOW_LINK=1` 
 eye point (Loftwing flight, where that point stops updating; far cinematic cameras) 1st person shows the 3rd-person
 view after 20 frames (a one-off camera cut doesn't switch it), and returns below 1000 units.
 
+Cutscene Camera (VR Options, on by default; `cutscene_camera` in `[VR]`): a cutscene hands 1st person to the game's
+camera (theatre) and back. The sign is the letterbox bars (`exec.c` `hud_letterbox_bar`): the game draws both bars on
+every frame, folded to no height outside cutscenes, and slides them in to 0.13 of the screen (NDC) in one (measured at
+a gate's cutscene). Taller than 0.02, a bar marks the frame (`vr_rig_letterbox_seen`); the cutscene lasts until no
+such bar has been drawn for 15 frames. In VR the bars aren't always taken for the HUD, so the check runs on every 2D
+draw. Z-targeting draws the same bars, and Link's actor looks the same in a cutscene as standing about (his action
+and flags at +0x460..+0x468), so the bars don't count while ZL is among the buttons given to the game
+(`hle/input.c` `input_zl_frame`, VR controllers included) or for 90 frames after, while they fold away.
+Whenever 1st person gives way to the game's camera (a cutscene, the Beetle, the boss lock, a far camera), the view
+is recentred (`vr_rig_take_recenter` -> `vr_recenter`): the shot starts in front of you, the HUD panel with it. Log:
+`[vr-rig] a cutscene: the game's camera` / `the cutscene over: 1st person again` / `1st person -> the game's camera:
+recentred`.
+
 Eye point left behind: in Eldin, after a short jump at the bottom of the incline to the volcano's gate, the view
 followed Link's animated head all the way up (bobbing, the sword and shield back on him, the Beetle's camera kept after
 it came back), as if the eye point (main+0x1829a30) had stayed where he jumped. While Link himself
@@ -416,11 +429,21 @@ backflip when targeting takes it further - switched off altogether, those left t
 
 ### Grips and physical climbing (`runtime/vr/vr_input.c`, `runtime/hle/player.c`)
 
-- **Opt-in:** VR Options > Physical Climbing (`[VR] physical_climbing`, default off). Off, the grips are the game's
-  L / R as before and nothing below runs.
-- **Grips:** with it on, the grips are the hands' own (doors, climbing). The game's L / R are a grip squeezed while a
-  stick click is held; a click used so sends no stick press and doesn't open the settings menu (squeeze within the menu hold's
-  0.6 s). Log: `[vr] a stick click held with a grip: the grip is the game's L / R`.
+- **Opt-in:** VR Options > Experimental: Physical Climbing (`[VR] physical_climbing`) and Physical Sheathing
+  (`[VR] physical_sheathing`), both default off. With both off, the grips are the game's L / R as before and nothing
+  below runs.
+- **Grips** (either on, 1st person: `vr_grips_free`): the grips are the hands' own (doors, climbing, the sword, the
+  shield). The game's L / R are a grip squeezed while a stick click is held; a click used so sends no stick press and
+  doesn't open the settings menu (squeeze within the menu hold's 0.6 s). Log: `[vr] a stick click held with a grip:
+  the grip is the game's L / R`.
+- **Shield** (`shield_update`, `JoyConTranslator.cpp`): a flick of the Joy-Con (L) raises the shield (Link's action
+  0x49), and the hand's ordinary motion raised it by accident (VR log: 0 -> 0x49 -> 0 with no thrust). So the left
+  Joy-Con is held still - no turning, gravity only - while the grips are free or the shield is up, and its motion goes
+  through for 0.15 s only after a deliberate thrust with the shield up (forward along where it points, over
+  `SKYRECOMP_VR_BASH_SPEED` m/s, 1.5: a bash) or a swing of both hands at once (each over 1.5 m/s: a spin attack).
+  Squeezing the left grip sends one flick (120 ms, `vr_input_shield_flick`, read in `vr_controls.c`) - once a squeeze:
+  sent again while held, each was another bash. Logs: `[shield]`, `[bash]`. `SKYRECOMP_LINK_ACTION_LOG=1` logs each
+  change of Link's action (+0x468).
 - **Climbing state:** Link's flags at his actor +0x460 - the decomp's `dAcPy_c::mActionFlags` (zeldaret/ss
   `include/d/d_player_act.h`, Wii +0x364; HD's fields sit 0xfc later, its `mCurrentAction` Wii +0x36c being our
   +0x468). `FLG0_ON_LADDDER` 0x20000, `FLG0_ON_VINES` 0x10000 (ivy). Seen in VR: `[climb] on ivy`.
@@ -436,8 +459,12 @@ backflip when targeting takes it further - switched off altogether, those left t
   eyes), at most 0.10 m in front, -0.30..0.30 m up, -0.05..0.40 m to the right, 0.08 m more to leave - with a light tick
   on reaching it. Squeezing the right grip there while the sword is sheathed (`vr_sword_sheathed`) draws it: the
   right Joy-Con is swung for 150 ms (`vr_input_draw_swing`, read in `vr_controls.c`: 3 rev/s about x, 3 g), as the game
-  draws its sword when the Joy-Con is swung. Letting go there while it is drawn, once the hand has left the spot since,
-  puts it away: B for 150 ms (the game's Put Away). Not while climbing. Log: `[sheath]`. Tested in VR.
+  draws its sword when the Joy-Con is swung. It stays out only while the grip is held: once it is out under the grip,
+  letting go anywhere puts it away - B for 150 ms (the game's Put Away), again every 300 ms until the game has it
+  sheathed; not in a spin attack or while dowsing. A swing doesn't draw it: while it is sheathed and Link has nothing
+  in use (`player_bare_on_foot`, `player.c`: none of the use-item, hanging, water, climbing, crawling or rope flags;
+  not in the sky), the right Joy-Con is held still (gravity only, its pointing kept). Not while climbing. Log:
+  `[sheath]`. Tested in VR.
 - **Held items while climbing:** no sword or shield is learned while he climbs or the Beetle flies, nor for 240 frames
   after (`vr_rig.c` held_learn): climbing ivy had learned a 168-index "sword" and a 348-index "shield" from meshes by
   his hands. Wrong entries in `vr_held_models.txt` (`<kind> <index count>` lines) can be deleted; real ones are

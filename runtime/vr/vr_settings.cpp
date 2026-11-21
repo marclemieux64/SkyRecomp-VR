@@ -136,6 +136,7 @@ std::vector<std::string> vr_lines() {
             "smooth_turn_speed = " + std::to_string((int)g_vr_config.smooth_turn_speed),
             "camera_height_offset = " + height.str(), "camera_distance_offset = " + distance.str(),
             std::string("level_horizon = ") + (g_vr_config.level_horizon ? "true" : "false"),
+            std::string("cutscene_camera = ") + (g_vr_config.cutscene_camera ? "true" : "false"),
             "hud_distance = " + hud_distance.str(), "hud_scale = " + hud_scale.str(),
             "hud_vertical_offset = " + hud_offset.str(),
             std::string("hud_curvature = ") + (g_vr_hud_config.curvature ? "true" : "false"),
@@ -196,6 +197,7 @@ extern "C" void LoadVRConfig(const char *filepath) {
         else if (key == "camera_height_offset") parse_float(value, g_vr_config.camera_height_offset);
         else if (key == "camera_distance_offset") parse_float(value, g_vr_config.camera_distance_offset);
         else if (key == "level_horizon") parse_bool(value, g_vr_config.level_horizon);
+        else if (key == "cutscene_camera") parse_bool(value, g_vr_config.cutscene_camera);
         else if (key == "hud_distance") parse_float(value, g_vr_hud_config.hud_distance);
         else if (key == "hud_scale") parse_float(value, g_vr_hud_config.hud_scale);
         else if (key == "hud_vertical_offset") parse_float(value, g_vr_hud_config.hud_vertical_offset);

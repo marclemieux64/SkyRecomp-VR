@@ -53,6 +53,11 @@ typedef struct VRConfig {
         = true
 #endif
         ;
+    bool cutscene_camera  // 1st person: the game's own camera during cutscenes (vr_rig.c, its letterbox bars)
+#ifdef __cplusplus
+        = true
+#endif
+        ;
     int move_direction
 #ifdef __cplusplus
         = 0
