@@ -166,6 +166,15 @@ int player_climb(float pos[3]) {
     return kind;
 }
 
+// Link's action (his actor +0x468, the decomp's mCurrentAction), -1: no Link. Digging with the Mole Mitts is 0x71, held
+// from the first dig until he gets up (measured in VR 2026-11-20, SKYRECOMP_LINK_ACTION_LOG: 0x3 -> 0x71 -> 0).
+int player_link_action(void) {
+    if (!g_is_skyward_100) return -1;
+    const uint64_t p = *(const uint64_t *)(uintptr_t)PLAYER_PTR;
+    if (!heap_ptr(p) || (p & 7) || *(const uint64_t *)(uintptr_t)p != PLAYER_VTABLE) return -1;
+    return (int)*(const volatile uint32_t *)(uintptr_t)(p + 0x468);
+}
+
 #define GAME_CAMERA_VIEW (MAIN_BASE + 0x2bfda90ull)
 
 // The boss door's key puzzle: from the A that examines the lock to the B that backs out (or the door opening), Link's
