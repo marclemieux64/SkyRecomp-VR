@@ -28,6 +28,8 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **Mole Mitts:** while Link digs, the view stays put instead of following his head down into each dig and back; look down at the hole yourself.
 - **Boss-key puzzle:** while you examine a boss door's lock and turn the key, the view switches to the game's own close-up of the key and the lock, and returns to 1st person when you back out or the door opens.
 - **Cutscene Camera** (VR Options, on by default): cutscenes play from the game's own camera, and 1st person comes back when they end. Z-targeting, which shows the same letterbox bars, stays in 1st person.
+- **Bombs:** a raised bomb gets the controller's real motion. The Skyward Strike assist, which holds a raised Joy-Con still and upright, now acts only with the sword out, so throws and rolls are told apart reliably, swings aren't ignored, and a throw from the Earth Temple's stone ball no longer blows up at once.
+- **No bombs or pouches taken for a sword or shield:** a new sword model is learned only while the sword is out, and a new shield only while it is raised. A bomb in his right hand had been learned as a sword, after which the real sword was left to the game; the Adventure Pouch had been learned as a shield, and was drawn on the left hand in its place now and then. Remove those lines (`0 168`, `1 348`) from `vr_held_models.txt` if you have them.
 - **Recentred on the game's camera:** whenever 1st person switches to the game's camera (a cutscene, the Beetle, the boss lock), the view is recentred, so the shot starts in front of you whichever way you had turned.
 
 ### Rendering
