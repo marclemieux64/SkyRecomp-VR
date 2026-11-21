@@ -60,6 +60,7 @@ void vr_rig_letterbox_seen(void) {
 // while targeting takes it further)
 #define LINK_HEAD_DETACH_SWORD 90.0f
 #define LINK_HEAD_ATTACHED_SWORD 60.0f
+#define LINK_ACTION_DIG 0x71  // (hle/player.c player_link_action: digging with the Mole Mitts - the view stays put)
 #define LINK_EYE_PART_MAX_VERTS 96
 #define LINK_EYE_PART_RADIUS 12.0f
 #define LINK_EYE_HEAD_RADIUS 20.0f  // (around his eyes as his head has them: the offset is kept in world axes, so a
@@ -289,6 +290,10 @@ void vr_rig_begin_frame(void) {
         const bool sword = vr_sword_out();
         const float attached = sword ? LINK_HEAD_ATTACHED_SWORD : LINK_HEAD_ATTACHED;
         const float detach = sword ? LINK_HEAD_DETACH_SWORD : LINK_HEAD_DETACH;
+        // (not while he digs with the Mole Mitts: each dig throws his head ~75 units forward and back, and the view
+        // went with it - your own head is free to look down at the hole)
+        extern int player_link_action(void);
+        const bool digging = player_link_action() == LINK_ACTION_DIG;
         if (have_eye && g_head_frame && g_head_frame + 2 >= renderer_present_count() + 1) {
             const float dx = g_head_world[0] - pos[0], dz = g_head_world[2] - pos[2], d = sqrtf(dx * dx + dz * dz);
             if (d < LINK_HEAD_ATTACHED) {  // (the head's usual offset: learnt only while they are together)
@@ -296,7 +301,7 @@ void vr_rig_begin_frame(void) {
                     g_head_offset[i] = g_head_offset_ok ? g_head_offset[i] + (pos[i] - g_head_world[i] - g_head_offset[i]) * 0.1f
                                                         : pos[i] - g_head_world[i];
                 g_head_offset_ok = true;
-            } else if (d >= attached && g_head_offset_ok) {  // (eased in between: no jump as the head moves off)
+            } else if (d >= attached && g_head_offset_ok && !digging) {  // (eased in between: no jump as the head moves off)
                 const float w = fminf(1.0f, (d - attached) / (detach - attached));
                 g_scripted = w > 0.5f;
                 for (int i = 0; i < 3; i++) pos[i] += (g_head_world[i] + g_head_offset[i] - pos[i]) * w;
