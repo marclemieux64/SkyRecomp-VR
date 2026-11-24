@@ -847,6 +847,47 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
             }
             s.stick[1][0] = s.stick[1][1] = 0;
         }
+        // VR Options > Game Camera Follows View: in 1st person the game's own camera, hidden in the headset, stays
+        // behind Link wherever you look, and what the game does relative to it (sound, swimming, the camera-relative
+        // controls) was off from your view. Its own camera control, the right stick's x (free here: turning took it),
+        // turns it toward where you look: full past 35 degrees, 0.3 just past 3, nothing within 3. Not while
+        // Z-targeting, with an item in use (aiming) or in the sky. The stick's direction is checked against how the
+        // camera turns while it is pushed, and flipped once if wrong (an inverted camera setting).
+        // SKYRECOMP_VR_CAM_FOLLOW_LOG=1 logs it.
+        if (g_vr_config.camera_follows_view && g_vr_config.view_mode == 1 && !paused && player_eye(NULL)) {
+            extern bool vr_rig_first_person(void);
+            extern bool vr_rig_game_camera_yaw(float *yaw);
+            extern float vr_rig_view_yaw(void);
+            extern uint32_t player_link_flags(void);
+            const float deg = (float)(M_PI / 180.0), dead = 3.0f * deg, full = 35.0f * deg, min = 0.3f;
+            static float sign = 1.0f, turned, last_cam;
+            static bool sign_known, have_last;
+            static int log = -1;
+            static uint64_t logged;
+            if (log < 0) log = getenv("SKYRECOMP_VR_CAM_FOLLOW_LOG") != NULL;
+            const bool sky = !memcmp((const void *)(uintptr_t)(MAIN_BASE + 0x2bf98d8ull), "F02", 3);
+            const bool busy = sky || s.zl > 0.3f || (player_link_flags() & (0x40000000u | 0x20000000u | 0x04000000u));
+            float cam = 0;
+            const bool have_cam = vr_rig_game_camera_yaw(&cam);
+            if (vr_rig_first_person() && !busy && have_cam) {
+                const float yaw = vr_rig_view_yaw(), a = fabsf(yaw);
+                // (from `min` past the dead zone: the game ignores less - measured in VR 2026-11-23, 0.22
+                // left the camera still, 9 degrees off the view, and 0.28 turned it)
+                const float x = a > dead ? (min + (1.0f - min) * fminf(1.0f, (a - dead) / (full - dead))) * (yaw > 0 ? 1.0f : -1.0f) : 0.0f;
+                s.stick[1][0] = -sign * x;
+                // (the camera turned toward the view while pushed: yaw is view - camera, so the camera's own turn has
+                // the sign of yaw; accumulated while pushed at least halfway)
+                if (!sign_known && have_last && fabsf(x) > 0.5f) {
+                    turned += remainderf(cam - last_cam, 2.0f * (float)M_PI) * (yaw > 0 ? 1.0f : -1.0f);
+                    if (turned < -20.0f * deg) sign = -sign, turned = 0, LOG("[vr] game camera follows view: stick direction flipped\n");
+                    else if (turned > 20.0f * deg) sign_known = true, LOG("[vr] game camera follows view: stick direction confirmed\n");
+                }
+                if (log && SDL_GetTicksNS() >= logged + 500000000ull)
+                    logged = SDL_GetTicksNS(), LOG("[cam-follow] view %.1f deg from the camera (at %.1f), stick %.2f, sign %+.0f%s\n",
+                                                   yaw / deg, cam / deg, s.stick[1][0], sign, sign_known ? " (confirmed)" : "");
+            }
+            last_cam = cam, have_last = have_cam;
+        }
     }
     // The game's motion sensors follow the aim poses (where each controller points); the grip poses (the controller
     // in the palm) place the wrist HUD.

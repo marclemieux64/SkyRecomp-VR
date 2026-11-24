@@ -183,6 +183,16 @@ so forward walks where the player looks (or points). `SKYRECOMP_VR_SHOW_LINK=1` 
 eye point (Loftwing flight, where that point stops updating; far cinematic cameras) 1st person shows the 3rd-person
 view after 20 frames (a one-off camera cut doesn't switch it), and returns below 1000 units.
 
+Game Camera Follows View (VR Options, on by default; `camera_follows_view` in `[VR]`): in 1st person the game's
+camera is hidden but still drives what the game does relative to it. It is turned toward where you look through its
+own control, the right stick's x (free in 1st person: turning takes it) - nothing within 3 degrees, 0.3 just past
+(the game ignores less: 0.22 left it 9 degrees off), full past 35. Not while Z-targeting, with an item in use or in
+the sky. The stick's direction is checked against how the camera turns, and flipped once if wrong (`vr_input.c`;
+`SKYRECOMP_VR_CAM_FOLLOW_LOG=1`). The 1st-person view is anchored on entry, not to the game camera, so turning it
+doesn't move the view. Standing still (action 0, the left stick let go, nothing in use), Link is turned to face where
+you look, more than 10 degrees off: his rotation's y (`+0x13e`), set before his update (`hle/player.c`
+`player_face_view`; `SKYRECOMP_VR_FACE_LOG=1`). He can't face the view while moving - he runs where he faces.
+
 Cutscene Camera (VR Options, on by default; `cutscene_camera` in `[VR]`): a cutscene hands 1st person to the game's
 camera (theatre) and back. The sign is the letterbox bars (`exec.c` `hud_letterbox_bar`): the game draws both bars on
 every frame, folded to no height outside cutscenes, and slides them in to 0.13 of the screen (NDC) in one (measured at

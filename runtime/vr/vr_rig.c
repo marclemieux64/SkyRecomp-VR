@@ -442,6 +442,30 @@ void vr_rig_begin_frame(void) {
 
 bool vr_rig_take_recenter(void) { return atomic_exchange(&g_recenter_request, false); }
 
+// (vr_input.c, Game Camera Follows View) 1st person, and the game camera's yaw (radians, the convention of
+// vr_rig_view_yaw)
+bool vr_rig_first_person(void) { return g_rig.mode == 1 && g_rig.have_game_view; }
+bool vr_rig_game_camera_yaw(float *yaw) {
+    if (!g_rig.have_game_view) return false;
+    const float *v = g_rig.game_view;
+    const float c[3] = {-v[8], -v[9], -v[10]};
+    if (c[0] * c[0] + c[2] * c[2] < 0.01f) return false;
+    *yaw = atan2f(c[0], c[2]);
+    return true;
+}
+float vr_rig_view_yaw(void);
+// (hle/player.c, Game Camera Follows View) Where you look in the game world (radians, atan2(x, z) like the game's
+// angles): false unless that option is on, in 1st person with VR running.
+bool vr_rig_view_world_yaw(float *yaw) {
+    extern bool vr_running(void);
+    float cam;
+    if (!g_vr_config.camera_follows_view || g_vr_config.view_mode != 1 || !vr_running() || !vr_rig_first_person() ||
+        !vr_rig_game_camera_yaw(&cam))
+        return false;
+    *yaw = cam + vr_rig_view_yaw();
+    return true;
+}
+
 void vr_rig_current_anchor(VrRigAnchor *a, const float *game_view) {
     if (g_rig.mode == 1) {
         const float eye[3] = {g_rig.link[0], g_rig.link[1] + g_vr_config.camera_height_offset + g_swim_raise, g_rig.link[2]};
