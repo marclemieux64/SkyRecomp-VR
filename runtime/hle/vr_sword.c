@@ -217,6 +217,8 @@ static void player_update_hook(Cpu *c) {
     const uint64_t pl = c->x[0];
     extern void vr_dowse_update(uint64_t pl, bool after);  // (dowsing along the blade: runtime/hle/vr_dowse.c)
     vr_dowse_update(pl, false);
+    extern void player_face_view(uint64_t pl);  // (hle/player.c: standing, he faces where you look)
+    player_face_view(pl);
     g_player_update(c);
     vr_dowse_update(pl, true);    const bool spin = *(const uint32_t *)(uintptr_t)(pl + LINK_ACTION) == ACTION_SPIN;
     if (spin != atomic_load(&g_spin)) {

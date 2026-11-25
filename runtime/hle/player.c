@@ -175,6 +175,31 @@ int player_link_action(void) {
     return (int)*(const volatile uint32_t *)(uintptr_t)(p + 0x468);
 }
 
+// (hle/vr_sword.c, Link's update, before it) VR Options > Game Camera Follows View: standing still in 1st person,
+// Link turns to face where you look - the game interacts with what he faces, and after walking back toward you (he
+// turns round to run) the things before your eyes were behind him. Only while he stands (action 0) with the left stick
+// let go and nothing in use; his facing is his rotation's y (+0x13e, as player_yaw reads it).
+// SKYRECOMP_VR_FACE_LOG=1 logs each turn.
+#define LINK_FACE_MIN_DEGREES 10.0f
+void player_face_view(uint64_t pl);
+void player_face_view(uint64_t pl) {
+    extern bool vr_rig_view_world_yaw(float *yaw);
+    extern float g_door_stick;
+    if (!g_is_skyward_100 || !heap_ptr(pl) || *(const uint64_t *)(uintptr_t)pl != PLAYER_VTABLE) return;
+    if (*(const volatile uint32_t *)(uintptr_t)(pl + 0x468) != 0 || g_door_stick > 0.2f) return;
+    if (*(const volatile uint32_t *)(uintptr_t)(pl + 0x460) & (0x40000000u | 0x20000000u | 0x04000000u)) return;
+    float yaw;
+    if (!vr_rig_view_world_yaw(&yaw) || !isfinite(yaw)) return;
+    volatile int16_t *ang = (volatile int16_t *)(uintptr_t)(pl + 0x13e);
+    const int16_t want = (int16_t)(int32_t)lrintf(remainderf(yaw, 2.0f * (float)M_PI) * (32768.0f / (float)M_PI));
+    const int16_t diff = (int16_t)(want - *ang);
+    if (abs(diff) < (int)(LINK_FACE_MIN_DEGREES / 180.0f * 32768.0f)) return;
+    static int log = -1;
+    if (log < 0) log = getenv("SKYRECOMP_VR_FACE_LOG") != NULL;
+    if (log) LOG("[face] Link turned from %d to %d (where you look)\n", (int)*ang, (int)want);
+    *ang = want;
+}
+
 // Link's flags (his actor +0x460, mActionFlags), 0: no Link. (diagnostics: vr_controls.c SKYRECOMP_BOMB_LOG)
 uint32_t player_link_flags(void);
 uint32_t player_link_flags(void) {

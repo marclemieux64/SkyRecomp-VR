@@ -945,6 +945,10 @@ static void tab_vr_options(void) {
     changed |= opt_toggle("Cutscene Camera", &g_vr_config.cutscene_camera, true,
                           "1st person: during cutscenes the view leaves Link's eyes for the game's own camera, and "
                           "returns to 1st person when the cutscene ends. Off: cutscenes stay in 1st person.");
+    changed |= opt_toggle("Game Camera Follows View", &g_vr_config.camera_follows_view, true,
+                          "1st person: the game's own camera, hidden in the headset, is turned toward where you look, "
+                          "so what the game does relative to it (sound, swimming, controls) matches your view. "
+                          "Off: it stays behind Link.");
     changed |= opt_slider("Camera Height", &g_vr_config.camera_height_offset, -50.0f, 50.0f, 5.0f, 0.0f, "%+g",
                           "Raises or lowers your viewpoint, in game units (about a centimetre each). In 1st person this "
                           "adjusts Link's eye height.");

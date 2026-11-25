@@ -58,6 +58,11 @@ typedef struct VRConfig {
         = true
 #endif
         ;
+    bool camera_follows_view  // 1st person: the game's hidden camera turned toward where you look (vr_input.c)
+#ifdef __cplusplus
+        = true
+#endif
+        ;
     int move_direction
 #ifdef __cplusplus
         = 0
