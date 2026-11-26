@@ -289,6 +289,92 @@ static void skyward_strike_assist(SkyJoyConSensor *s) {
     for (int i = 0; i < 3; i++) if (fabsf(s->gyro[i]) < jitter) s->gyro[i] = 0.0f;
 }
 
+// Bombs, overhand or underhand by where the hand is. The game tells a throw from a roll by which way the Joy-Con points
+// as the swing starts: up throws, down rolls (SKYRECOMP_BOMB_LOG dumps, user 2026-11-25: five overhand throws pointing
+// up, 0.98 of the way, and five underhand rolls pointing down, -0.95, all as meant). A swing begun with the controller
+// level was the game's guess. So while Link holds a bomb, the Joy-Con's reported pitch is set from the hand's height
+// instead: less than BOMB_OVERHAND_DROP below the eyes, BOMB_PITCH up; lower, BOMB_PITCH down. It is turned about the
+// horizontal axis across its heading (its yaw and roll kept), gravity in the accelerometer turned with it (the hand's
+// own acceleration kept). Once the swing starts (BOMB_SWING_GYRO) the offset is frozen until the throw (0x41) ends -
+// or, a swing that threw nothing, the hand has been still for BOMB_SETTLE_NS - so the game sees the swing as made, from
+// that pitch. SKYRECOMP_VR_BOMB_RAW=1: as the hand points.
+// A bomb in his hand: his action is 0x43 when he takes it out or stops, but back to 0 standing and 3 walking with it
+// still held (user's log 2026-11-25: throws from 3 too) - so from 0x43 until he throws or rolls it (0x41, then any
+// other action), puts it away (0x42, 0x44), is hurt (0x36, 0x37), the sword comes out, or BOMB_HELD_NS.
+#define BOMB_OVERHAND_DROP 0.40f  // metres below the eyes
+#define BOMB_PITCH 70.0f          // degrees
+#define BOMB_SWING_GYRO 0.6f      // rev/s
+#define BOMB_SETTLE_NS 400000000ull
+#define BOMB_HELD_NS 12000000000ull
+static bool g_bomb_sword_pull;  // (the sword came out with a bomb in hand: the log's motion dump - vr_joycon_sensor)
+static void bomb_gesture(SkyJoyConSensor *s) {
+    static int raw = -1, log = -1;
+    if (raw < 0) raw = getenv("SKYRECOMP_VR_BOMB_RAW") != NULL;
+    if (log < 0) log = getenv("SKYRECOMP_BOMB_LOG") != NULL;
+    extern int player_link_action(void), vr_sword_sheathed(void);
+    extern float vr_input_right_hand_drop(void);
+    extern bool vr_running(void);
+    static bool active, frozen, held, thrown;
+    static uint64_t held_since, still_since;
+    static float angle, hx = 0.0f, hy = 1.0f;  // (the offset; the pointing's last heading in the player's frame)
+    const int action = player_link_action();
+    const uint64_t now = SDL_GetTicksNS();
+    const float g = sqrtf(s->gyro[0] * s->gyro[0] + s->gyro[1] * s->gyro[1] + s->gyro[2] * s->gyro[2]);
+    if (action == 0x43 && !held) held = true, thrown = false, held_since = now;
+    if (held) {
+        const char *why = NULL;
+        if (action == 0x41) thrown = true;
+        else if (thrown) why = "thrown";
+        if (action == 0x42 || action == 0x44) why = "put away";
+        if (action == 0x36 || action == 0x37) why = "hurt";
+        // (the sword's state settles over 10 updates - hle/vr_sword.c: not in the first half second, while it's put away)
+        if (vr_sword_sheathed() == 0 && now - held_since > 500000000ull) why = "the sword came out", g_bomb_sword_pull = true;
+        if (now - held_since > BOMB_HELD_NS) why = "held too long";
+        if (why) {
+            held = active = frozen = false;
+            if (log) LOG("[bomb] no longer in hand: %s (action %#x)\n", why, action);
+        }
+    }
+    if (raw || !vr_running() || g_vr_config.view_mode != 1 || !held) {
+        active = frozen = false;
+        return;
+    }
+    const float deg = (float)(M_PI / 180.0);
+    if (frozen && action != 0x41) {  // (a swing that threw nothing: free again once the hand is still)
+        if (g >= BOMB_SWING_GYRO) still_since = now;
+        else if (now - still_since > BOMB_SETTLE_NS) frozen = false;
+    }
+    if (!frozen) {
+        const float drop = vr_input_right_hand_drop();
+        if (!isfinite(drop)) { active = false; return; }
+        const bool over = drop < BOMB_OVERHAND_DROP;
+        const float fx = s->direction[3], fy = s->direction[4], n = sqrtf(fx * fx + fy * fy);
+        if (n > 0.2f) hx = fx / n, hy = fy / n;  // (pointing nearly straight up or down: the last heading)
+        const float p = asinf(fmaxf(-1.0f, fminf(1.0f, s->direction[5])));
+        angle = (over ? BOMB_PITCH : -BOMB_PITCH) * deg - p;
+        active = true;
+        if (g >= BOMB_SWING_GYRO) {  // (the swing starts: this offset until the throw ends)
+            frozen = true, still_since = now;
+            if (log) LOG("[bomb] swing from %.2f m below the eyes: %s (pointing %.0f degrees, sent as %+.0f)\n", drop,
+                         over ? "overhand, a throw" : "underhand, a roll", p / deg, over ? BOMB_PITCH : -BOMB_PITCH);
+        }
+    }
+    if (!active) return;
+    // (about a = heading x up = (hy, -hx, 0): a positive angle raises the pointing - Rodrigues, a perpendicular to up)
+    const float ax = hy, ay = -hx, c = cosf(angle), sn = sinf(angle);
+    float down_old[3], down_new[3];
+    for (int i = 0; i < 3; i++) down_old[i] = -s->direction[i * 3 + 2];
+    for (int r = 0; r < 3; r++) {
+        float *v = s->direction + r * 3;
+        const float dot = ax * v[0] + ay * v[1];
+        const float cx = ay * v[2], cy = -ax * v[2], cz = ax * v[1] - ay * v[0];  // a x v
+        const float o[3] = {v[0] * c + cx * sn + ax * dot * (1 - c), v[1] * c + cy * sn + ay * dot * (1 - c), v[2] * c + cz * sn};
+        memcpy(v, o, sizeof o);
+    }
+    for (int i = 0; i < 3; i++) down_new[i] = -s->direction[i * 3 + 2];
+    for (int i = 0; i < 3; i++) s->accel[i] += down_new[i] - down_old[i];  // (accel = down - motion: the motion kept)
+}
+
 bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
     SkyJoyConSensor s;
     extern bool motion_joycon_mode(void);
@@ -310,6 +396,7 @@ bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
             if (!said++) LOG("[vr] physical sheathing: a swing of the right controller doesn't draw the sword\n");
         }
         skyward_strike_assist(&s);
+        bomb_gesture(&s);  // (a bomb held: thrown or rolled by where the hand is)
     }
     {   // (physical sheathing, vr_input.c: a grab over the shoulder draws the sword with a swing of the Joy-Con)
         extern bool vr_input_draw_swing(float gyro[3], float accel[3]);
@@ -334,9 +421,37 @@ bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
             const int action = player_link_action();
             const uint32_t flags = player_link_flags();
             const uint64_t now = SDL_GetTicksNS();
-            if (action != last_action || flags != last_flags) {
+            // (the motion the game was given, sample by sample: dumped when Link starts a new kind of action - a throw,
+            // a roll - with the last BOMB_RING samples before it, to see which motion the game takes as which)
+            enum { BOMB_RING = 48 };
+            static struct { uint64_t t; float g[3], a[3], y[3], z[3]; } ring[BOMB_RING];
+            static int head;
+            ring[head % BOMB_RING].t = now;
+            memcpy(ring[head % BOMB_RING].g, s.gyro, sizeof s.gyro);
+            memcpy(ring[head % BOMB_RING].a, s.accel, sizeof s.accel);
+            memcpy(ring[head % BOMB_RING].y, s.direction + 3, 3 * sizeof(float));
+            memcpy(ring[head % BOMB_RING].z, s.direction + 6, 3 * sizeof(float));
+            head++;
+            const bool pull = g_bomb_sword_pull;  // (the sword came out with a bomb in hand - bomb_gesture)
+            g_bomb_sword_pull = false;
+            if (action != last_action || flags != last_flags || pull) {
                 LOG("[bomb-log] action %#x flags %08x (was %#x %08x) | since: gyro peak %.2f accel peak %.2f\n", action,
                     flags, last_action, last_flags, peak_g, peak_a);
+                const bool routine = action == 0 || action == 3 || action == 0x3f || action == 0x40 || action == 0x43 ||
+                                     action == -1 || action == 8 || action == 0x10 || action == 7;
+                if ((action != last_action && !routine) || pull) {
+                    static int n;
+                    LOG("[bomb-dump] #%d %s %#x from %#x: the motion given before it (ms before; gyro rev/s; accel g; "
+                        "pointing y-axis; z-axis, all in the player's frame: z up)\n", ++n,
+                        pull ? "THE SWORD CAME OUT WITH A BOMB IN HAND, action" : "action", action, last_action);
+                    for (int i = head - BOMB_RING; i < head; i++) {
+                        if (i < 0) continue;
+                        const typeof(ring[0]) *r = &ring[i % BOMB_RING];
+                        LOG("[bomb-dump] #%d %5.0f | g %6.2f %6.2f %6.2f | a %6.2f %6.2f %6.2f | y %5.2f %5.2f %5.2f | z %5.2f %5.2f %5.2f\n",
+                            n, (double)(now - r->t) / 1e6, r->g[0], r->g[1], r->g[2], r->a[0], r->a[1], r->a[2], r->y[0],
+                            r->y[1], r->y[2], r->z[0], r->z[1], r->z[2]);
+                    }
+                }
                 last_action = action, last_flags = flags, peak_g = peak_a = 0;
             }
             if (g > 0.5f && now >= next) {

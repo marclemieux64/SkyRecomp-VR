@@ -313,6 +313,10 @@ static void climb_update(SkyVrControllers *s) {
 #define SHEATH_SWING_NS 150000000ull
 #define SHEATH_B_NS 150000000ull
 static _Atomic uint64_t g_draw_swing_until;
+// The right hand's height below the eyes (metres, NAN: not tracked) - vr_controls.c, bombs
+static _Atomic float g_right_hand_drop = NAN;
+float vr_input_right_hand_drop(void);
+float vr_input_right_hand_drop(void) { return atomic_load(&g_right_hand_drop); }
 // (vr_controls.c, the right Joy-Con's sensor) a swing to draw the sword: gyro (rev/s about x y z) and acceleration (g)
 bool vr_input_draw_swing(float gyro[3], float accel[3]) {
     if (SDL_GetTicksNS() >= atomic_load(&g_draw_swing_until)) return false;
@@ -614,6 +618,12 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         { extern float g_door_stick; g_door_stick = sqrtf(ls.x * ls.x + ls.y * ls.y); }  // (hle/door.c trace)
         s.stick[1][0] = rs.x; s.stick[1][1] = rs.y;
         for (int h = 0; h < 2; h++) locate_hand(aim_space[h], space, time, &s.hand[h]);
+        {   // (vr_controls.c, bombs: overhand or underhand by where the right hand is) its height below the eyes, metres
+            extern bool vr_head_pose(float q[4], float p[3]);
+            float q[4], head[3];
+            const bool ok = s.hand[1].tracked && vr_head_pose(q, head);
+            atomic_store(&g_right_hand_drop, ok ? head[1] - s.hand[1].position[1] : NAN);
+        }
         // the sword's tip in the right hand, its speed in the room (m/s) - the hand's own motion, not walking or
         // turning (hle/vr_sword.c): v + w x r, r the blade (0.8 m along the controller's -z)
         const SkyVrHand *r = &s.hand[1];

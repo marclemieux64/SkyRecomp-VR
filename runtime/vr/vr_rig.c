@@ -33,6 +33,11 @@ bool game_camera_view(float view[12]);  // runtime/hle/player.c: the game camera
 // have been gone this many frames (a camera cut or a fade between shots)
 #define CUTSCENE_HOLD_FRAMES 15
 static _Atomic bool g_recenter_request;  // (vr_rig_begin_frame: 1st person left for the game's camera)
+// New hand meshes are learned (hand_side) only once 1st person has held for HAND_LEARN_STEADY frames: one first seen
+// on the frame a cutscene took the view was learned by the cutscene's camera, in front of him - his right hand taken
+// for his left, both drawn on the left controller until the sword came out (user 2026-11-26, hand log frame 2145).
+#define HAND_LEARN_STEADY 30
+static _Atomic uint64_t g_fp_steady_from;  // (the present count from which 1st person has been steady)
 #define CUTSCENE_AFTER_ZL 90  // (frames after ZL is let go that the bars are still targeting's: they fold away in ~30)
 static _Atomic uint64_t g_letterbox_frame;
 void vr_rig_letterbox_seen(void) {
@@ -437,6 +442,7 @@ void vr_rig_begin_frame(void) {
         fprintf(stderr, "[vr-rig] frame %llu: 1st person -> the game's camera: recentred\n",
                 (unsigned long long)renderer_present_count());
     }
+    if (mode != 1 || g_rig.mode != 1) g_fp_steady_from = renderer_present_count() + HAND_LEARN_STEADY;  // (hand_side)
     g_rig.mode = mode;
 }
 
@@ -1111,17 +1117,33 @@ void vr_rig_set_hand_draw(int side) {
     g_hand_draw = side, g_hand_blocks = false, g_door_blocks = false, g_held_on = false, g_skin_on = false;
 }
 // How far to Link's right a point of the world is (negative: to his left), by the way he faces. False: not known.
+// Not for HAND_TURN_SETTLE frames after he turned at once by more than HAND_TURN_JUMP: standing, he is turned to face
+// where you look (hle/player.c player_face_view, up to half a turn after walking back), and his hands as drawn just
+// then were posed facing the old way - a hand mesh first seen then was learned on the wrong side and kept, both hands
+// drawn on the left controller (user 2026-11-26, "hand meshes 759 and 744 both on the left" over and over).
+#define HAND_TURN_JUMP 0.1f  // radians in one call (about 6 degrees: his own turning is a few a frame)
+#define HAND_TURN_SETTLE 30
 static bool hand_rightness(const float w[3], float *out) {
     extern bool player_yaw(float *yaw);
+    extern uint64_t renderer_present_count(void);
     float yaw;
     if (!player_yaw(&yaw)) return false;
+    {
+        static float last;
+        static bool have;
+        static uint64_t settle_until;
+        const uint64_t now = renderer_present_count();
+        if (have && fabsf(remainderf(yaw - last, 2.0f * (float)M_PI)) > HAND_TURN_JUMP) settle_until = now + HAND_TURN_SETTLE;
+        last = yaw, have = true;
+        if (now < settle_until) return false;
+    }
     const float fx = sinf(yaw), fz = cosf(yaw), dx = w[0] - g_rig.link[0], dz = w[2] - g_rig.link[2];
     *out = -dx * fz + dz * fx;  // (his right: (-fz, fx) - facing -z it is +x)
     return true;
 }
 
 // Each side's hand mesh last drawn: its index count, how far to the camera's right and to his own right (hand_side).
-static uint64_t side_count[2];
+static uint64_t side_count[2], side_vb[2];
 static float side_dx[2], side_right[2];
 static bool side_right_ok[2];
 #define HELD_TRUTH_RECENT 300  // (frames: the sword or shield in a hand this recently - which hand is which is theirs)
@@ -1226,11 +1248,14 @@ static int hand_side(const float *slot0, uint64_t count, uint64_t vb, uint64_t v
     // his right hand (both measured this frame); both remembered so. Seen as the sword in the left hand, now and then)
     float rightness_now;
     const bool have_rightness = hand_rightness(w, &rightness_now);
-    if (side >= 0 && g_hand_last_frame[side] == now && side_count[side] != count && g_hand_last_frame[!side] != now) {
+    // (two meshes, not two index counts: both hands' meshes can have the same count - 744 and 744, 2026-11-26 - and
+    // went uncorrected; the other is known by its vertex buffer too)
+    if (side >= 0 && g_hand_last_frame[side] == now && (side_count[side] != count || side_vb[side] != vb) &&
+        g_hand_last_frame[!side] != now) {
         const int mine = have_rightness && side_right_ok[side] ? (rightness_now > side_right[side] ? 1 : 0)
                                                                : (dx > side_dx[side] ? 1 : 0);
         for (int i = 0; i < 8; i++)
-            if (g_hand_mesh[i].vb == vb && g_hand_mesh[i].count == side_count[side]) g_hand_mesh[i].side = !mine;
+            if (g_hand_mesh[i].vb == side_vb[side] && g_hand_mesh[i].count == side_count[side]) g_hand_mesh[i].side = !mine;
         g_hand_mesh[learned].side = mine;
         fprintf(stderr, "[vr-rig] hand meshes %llu and %llu both on the %s: %llu is the right hand\n",
                 (unsigned long long)side_count[side], (unsigned long long)count, side ? "right" : "left",
@@ -1238,10 +1263,12 @@ static int hand_side(const float *slot0, uint64_t count, uint64_t vb, uint64_t v
         if (mine == side) {  // (the one drawn first was the other hand: its place moves to the other side)
             memcpy(g_hand_last[!side], g_hand_last[side], sizeof g_hand_last[side]);
             g_hand_last_frame[!side] = now, side_count[!side] = side_count[side], side_dx[!side] = side_dx[side];
+            side_vb[!side] = side_vb[side];
             side_right[!side] = side_right[side], side_right_ok[!side] = side_right_ok[side];
         }
         side = mine;
     }
+    if (side < 0 && renderer_present_count() < atomic_load(&g_fp_steady_from)) return -1;  // (not yet: HAND_LEARN_STEADY)
     if (side < 0) {
         // A new mesh (taking out an item or pulling a trigger swaps in another pose's mesh): the side not drawn yet
         // this frame, else the one whose last position is nearer; with neither known yet, the side of the game
@@ -1274,7 +1301,7 @@ static int hand_side(const float *slot0, uint64_t count, uint64_t vb, uint64_t v
     }
     memcpy(g_hand_last[side], w, sizeof w);
     g_hand_last_frame[side] = now;
-    side_count[side] = count, side_dx[side] = dx;
+    side_count[side] = count, side_dx[side] = dx, side_vb[side] = vb;
     side_right[side] = rightness_now, side_right_ok[side] = have_rightness;
     {   // Both hands drawn this frame, each clearly on the other's side of him, for HAND_SWAPPED_FRAMES frames running:
         // they were learned the wrong way round (above) - every learned mesh changes sides. (A swing takes one hand
