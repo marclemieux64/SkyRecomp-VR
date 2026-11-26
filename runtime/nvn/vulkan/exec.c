@@ -22,6 +22,7 @@
 #include "../../frame_rate.h"
 #include "../../vr/vr.h"
 #include "../../vr/vr_rig.h"
+#include "../../vr/vr_settings.h"
 #include "multiview.h"
 #include "../paint_filter.h"
 #include "../output_scale.h"
@@ -6222,7 +6223,12 @@ TexBackend *vk_vr_eye_post(int eye, TexBackend *b, uint32_t ow, uint32_t oh) {
     const bool down = !fast && (b->width > ow + 1 || b->height > oh + 1);
     const bool up = !fast && !down && (b->width + 1 < ow || b->height + 1 < oh);
     const bool fsr = up && g_settings.upscaler == UPSCALE_FSR1, nis = up && g_settings.upscaler == UPSCALE_NIS;
-    if (!smaa && !down && !fsr && !nis) return b;
+    // VR Options > Sharpness (issue #26: "the game looks so blurry"): 0 leaves the sharpening as it was - a light RCAS
+    // after a downscale, FSR's / NIS's own after an upscale, none at the headset's own size; above 0 it sets RCAS's
+    // strength for all three (2 stops at the lightest down to 0, the strongest), at native size as an RCAS pass of its own.
+    const float sharp = fast ? 0.0f : g_vr_config.sharpness;
+    const bool native_sharpen = sharp > 0.001f && !down && !fsr && !nis;
+    if (!smaa && !down && !fsr && !nis && !native_sharpen) return b;
     vk_end_pass();
     VkCommandBuffer cb = vk_cmd();
     gp_mark(cb, "vr eye %d post %ux%u -> %ux%u%s%s", eye, b->width, b->height, ow, oh, smaa ? " smaa" : "",
@@ -6255,9 +6261,11 @@ TexBackend *vk_vr_eye_post(int eye, TexBackend *b, uint32_t ow, uint32_t oh) {
         v = post_view(out);
         res = out;
     }
-    if (down) {
+    const float rcas_amount = sharp > 0.001f ? exp2f(-2.0f * (1.0f - sharp)) : 0.0f;  // (exp2(-stops); 0: the default)
+    if (down || native_sharpen) {
         TexBackend *r = post_image(base + 4, ow, oh);
-        float pr[8] = {exp2f(-0.5f), 0, 0, 0, (float)ow, (float)oh};  // (gentler than FSR's 0.2 stops: no upscale blur to undo)
+        // (by default gentler than FSR's 0.2 stops: no upscale blur to undo)
+        float pr[8] = {rcas_amount > 0 ? rcas_amount : exp2f(-0.5f), 0, 0, 0, (float)ow, (float)oh};
         VkImageView ri_[3] = {v};
         post_pass(cb, "rcas.frag", ri_, 1, r, pr, false);
         res = r;
@@ -6266,7 +6274,8 @@ TexBackend *vk_vr_eye_post(int eye, TexBackend *b, uint32_t ow, uint32_t oh) {
         float pe[8] = {iw / ow, ih / oh, 0.5f * iw / ow - 0.5f, 0.5f * ih / oh - 0.5f, iw, ih};
         VkImageView ei[3] = {v};
         post_pass(cb, fsr ? "easu.frag" : "nis_easu.frag", ei, 1, e, pe, false);
-        float pr[8] = {fsr ? exp2f(-0.2f) : 0.35f, 0, 0, 0, (float)ow, (float)oh};
+        float pr[8] = {fsr ? (rcas_amount > 0 ? rcas_amount : exp2f(-0.2f)) : (sharp > 0.001f ? sharp : 0.35f), 0, 0, 0,
+                       (float)ow, (float)oh};
         VkImageView ri_[3] = {post_view(e)};
         post_pass(cb, fsr ? "rcas.frag" : "nis_rcas.frag", ri_, 1, r, pr, false);
         res = r;

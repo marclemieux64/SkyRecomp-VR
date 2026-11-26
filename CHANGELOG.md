@@ -37,6 +37,7 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **Item card on the right wrist:** with the Wrist HUD on, a second card on the other hand (the right, unless swapped) holds the current item slot with its count, ZR Items and R Pouch, and the shield gauge, taken off the floating HUD. The status card on the left also keeps the rupee counter's third digit, which had stayed on the floating HUD.
 
 ### Rendering
+- **Sharpness** (VR Options, under VR Resolution): sharpens each eye's image with AMD FidelityFX RCAS, at any VR Resolution - including the headset's own size, where the eyes weren't sharpened at all. 0, the default, keeps the light sharpening as it was.
 - **Culling follows the headset:** objects are culled against the eyes' view, and their draw distance is measured along where you look.
 
 ### Packaging

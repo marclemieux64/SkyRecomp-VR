@@ -543,6 +543,9 @@ are expected to be the same object.
   kept its aliasing), SMAA at the headset's size, a light RCAS sharpen. Below it: SMAA, then the Video tab's upscaler
   (FSR 1 / NIS). At native resolution: optional SMAA without sharpening, to avoid amplifying subpixel shimmer on
   thin geometry such as Skyloft's ladders and fences. Fast VR Post-Processing bypasses these optional passes.
+  VR Options > Sharpness (`sharpness` in `[VR]`, 0..1, 0 by default - issue #26): above 0 it sets RCAS's strength,
+  exp2(-2 (1 - s)) (2 stops at the lightest, 0 at 1), after a downscale and after FSR (NIS: s itself), and adds an
+  RCAS pass at native resolution; 0 keeps the defaults above.
   SMAA follows the Video tab's "Anti-aliasing". Cost at 1.5x: 0.66 ms per eye.
   The desktop window does the same when the internal resolution is above the window's size (exec.c
   `post_process`; 2x into 1280x720: jagged edges before, ~0.15 ms; `LARECOMP_POST_DOWN=0`: the old bilinear present).

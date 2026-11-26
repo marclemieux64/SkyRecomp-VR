@@ -65,6 +65,8 @@ void validate(VRConfig &config) {
     if (!std::isfinite(config.camera_height_offset)) config.camera_height_offset = kDefaults.camera_height_offset;
     if (!std::isfinite(config.camera_distance_offset)) config.camera_distance_offset = kDefaults.camera_distance_offset;
     config.resolution_scale = std::clamp(config.resolution_scale, 0.5f, 2.0f);
+    if (!std::isfinite(config.sharpness)) config.sharpness = kDefaults.sharpness;
+    config.sharpness = std::clamp(config.sharpness, 0.0f, 1.0f);
     config.dynamic_resolution_min = std::clamp(config.dynamic_resolution_min, 0.5f, config.resolution_scale);
     config.world_scale = std::clamp(config.world_scale, 50.0f, 200.0f);
     config.camera_height_offset = std::clamp(config.camera_height_offset, -50.0f, 50.0f);
@@ -112,11 +114,13 @@ std::vector<std::string> vr_lines() {
     wrist_tilt << std::fixed << std::setprecision(1) << g_vr_hud_config.wrist_hud_tilt;
     wrist_background << std::fixed << std::setprecision(2) << g_vr_hud_config.wrist_hud_background;
     resolution << std::fixed << std::setprecision(2) << g_vr_config.resolution_scale;
+    std::ostringstream sharpness;
+    sharpness << std::fixed << std::setprecision(2) << g_vr_config.sharpness;
     resolution_min << std::fixed << std::setprecision(2) << g_vr_config.dynamic_resolution_min;
     world << std::fixed << std::setprecision(2) << g_vr_config.world_scale;
     height << std::fixed << std::setprecision(2) << g_vr_config.camera_height_offset;
     distance << std::fixed << std::setprecision(2) << g_vr_config.camera_distance_offset;
-    return {"[VR]", "resolution_scale = " + resolution.str(),
+    return {"[VR]", "resolution_scale = " + resolution.str(), "sharpness = " + sharpness.str(),
             std::string("desktop_mirror = ") + (g_vr_config.desktop_mirror ? "true" : "false"),
             std::string("dynamic_resolution = ") + (g_vr_config.dynamic_resolution ? "true" : "false"),
             "dynamic_resolution_min = " + resolution_min.str(),
@@ -179,6 +183,7 @@ extern "C" void LoadVRConfig(const char *filepath) {
         const std::size_t comment = value.find_first_of(";#");
         if (comment != std::string::npos) value = trim(value.substr(0, comment));
         if (key == "resolution_scale") parse_float(value, g_vr_config.resolution_scale);
+        else if (key == "sharpness") parse_float(value, g_vr_config.sharpness);
         else if (key == "desktop_mirror") parse_bool(value, g_vr_config.desktop_mirror);
         else if (key == "dynamic_resolution") parse_bool(value, g_vr_config.dynamic_resolution);
         else if (key == "dynamic_resolution_min") parse_float(value, g_vr_config.dynamic_resolution_min);

@@ -123,6 +123,11 @@ typedef struct VRConfig {
         = false
 #endif
         ;                                // opt-in: grip and pull to climb (vr_input.c); the grips then aren't L / R
+    float sharpness
+#ifdef __cplusplus
+        = 0.0f
+#endif
+        ;                                // the eyes' RCAS sharpening, 0..1 (0: as before - nvn/vulkan/exec.c)
     bool physical_sheathing
 #ifdef __cplusplus
         = false
