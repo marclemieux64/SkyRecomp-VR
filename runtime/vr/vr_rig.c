@@ -1398,6 +1398,148 @@ bool vr_rig_held_skin_draw(const float *slot0, uint64_t size0, const float *bone
     return true;
 }
 
+// ---- his cuffs (VR Options > Show Cuffs). They are part of his arms' mesh - the game's plain draw of CUFF_MESH_COUNT
+// vertices, a triangle list, which 1st person hides with the rest of his body. Read from the game's own model (romfs
+// Object/NX/ObjectPack.arc.LZ > oarc/Alink.arc > g3d/model.brres, MDL0 "al", object polygon0 "al_arm_L__al_upother_m":
+// 554 triangles, his upper arms, forearms, a collar piece and the cuffs), the cuffs are its last 192 triangles - every
+// triangle lying, in the bind pose, 56.5 units or more out along an arm (the cuff's flare starts at 57, the wrist is
+// at 73.2) - one run, vertices 1086..1661 of the game's draw. With the option on that draw is kept, only those vertices
+// drawn (exec.c), and each of its bones moved with its arm's hand to that controller (T = Vg C K Hg^-1, as the hands
+// are moved - the Slingshot's way). SKYRECOMP_VR_CUFF_COUNT: the mesh; SKYRECOMP_VR_CUFF_LOG=1: the bones' arms, once.
+#define CUFF_MESH_COUNT 1662
+#define CUFF_FIRST 1086
+#define CUFF_VERTS 576
+#define CUFF_SIDE_MARGIN 15.0f  // (a bone is one arm's when this much nearer that hand than the other)
+#define CUFF_REACH 32.0f  // (measured in VR: 4 bones a hand at 22-28 - the wrist; the next 37-39, then 51+ - elbow, arm)
+static bool g_cuff_on;
+static float g_cuff_T[2][12], g_cuff_HD[2][12], g_cuff_HI[2][12];  // (each hand: game -> drawn; drawn; game inverse)
+static bool g_cuff_side_ok[2];
+static float cuff_env(const char *name, float def) {
+    const char *e = getenv(name);
+    return e ? (float)atof(e) : def;
+}
+bool vr_rig_cuff_draw(uint64_t count) {  // (exec.c: Link's own skinned draw - kept, its bones changed, if true)
+    g_cuff_on = false;
+    static float want = -1;
+    if (want < 0) want = cuff_env("SKYRECOMP_VR_CUFF_COUNT", CUFF_MESH_COUNT);
+    if (!g_vr_config.show_cuffs || count != (uint64_t)want || !hands_on() || !g_rig.have_game_view) return false;
+    extern uint64_t renderer_present_count(void);
+    const uint64_t now = renderer_present_count() + 1;
+    bool any = false;
+    for (int s = 0; s < 2; s++) {
+        g_cuff_side_ok[s] = false;
+        float C[12], K[12], ck[12], hd[12], hi[12];
+        if (!g_hand_game_frame[s] || g_hand_game_frame[s] + 2 < now || !g_grip_ok[s] || !vr_rig_controller_pose(s, C) ||
+            !a_inverse(g_hand_game[s], hi))
+            continue;
+        hand_k(s, K);
+        a_mul(C, K, ck);
+        a_mul(g_rig.game_view, ck, hd);  // (the hand as drawn, in game camera space)
+        a_mul(hd, hi, g_cuff_T[s]);
+        memcpy(g_cuff_HD[s], hd, sizeof hd), memcpy(g_cuff_HI[s], hi, sizeof hi);
+        g_cuff_side_ok[s] = any = true;
+    }
+    if (!any) return false;
+    g_cuff_on = true;
+    static int said;
+    if (!said++) fprintf(stderr, "[vr] first person: his cuffs drawn on the controllers (mesh %llu)\n", (unsigned long long)count);
+    return true;
+}
+// (exec.c) This draw's bone palette (n matrices, row-major 3x4, game camera space), changed in place. False: not the cuffs.
+bool vr_rig_cuff_bones(float *b, int n) {
+    if (!g_cuff_on) return false;  // (kept for the draw's other eye: vr_rig_cuff_draw sets it afresh each draw)
+    static float reach = -1;
+    static int log = -1;
+    if (reach < 0) reach = cuff_env("SKYRECOMP_VR_CUFF_REACH", CUFF_REACH);
+    if (log < 0) log = getenv("SKYRECOMP_VR_CUFF_LOG") != NULL;
+    // Which arm each bone is, by its place in the palette (the same bone each frame): learned when it is clearly by one
+    // hand - within the reach of it and CUFF_SIDE_MARGIN further from the other - and kept. The nearer hand each frame
+    // was wrong whenever the game held his hands close: a forearm bone went with the other controller, his skin
+    // stretched between them in spikes (user 2026-11-26).
+    enum { CUFF_BONES = 256 };
+    static int8_t arm[CUFF_BONES];  // (0 unknown, 1 left, 2 right)
+    static int arm_n;
+    // Frozen behind the hands: following his forearms as the game animates them, the cuffs bobbed about the hands
+    // while he moved (user 2026-11-26). So each bone's place relative to its hand (Hg^-1 B) is taken once, while he
+    // stands (action 0) with both hands drawn - CUFF_FREEZE_DRAWS draws running, his arms at rest - and from then on
+    // the bone is that place on the hand as drawn (Hd rel), whatever the animation does.
+    enum { CUFF_FREEZE_DRAWS = 30 };
+    static float rel[CUFF_BONES][12];
+    static int8_t rel_side[CUFF_BONES];
+    static bool frozen;
+    static int calm;
+    if (arm_n != n) memset(arm, 0, sizeof arm), arm_n = n, frozen = false, calm = 0;  // (another palette: afresh)
+    if (frozen && !(g_cuff_side_ok[0] && g_cuff_side_ok[1])) {  // (a hand not tracked: its bones as they are)
+        for (int i = 0; i < n && i < CUFF_BONES; i++) {
+            const int s = rel_side[i];
+            if (!g_cuff_side_ok[s]) continue;
+            float o[12];
+            a_mul(g_cuff_HD[s], rel[i], o);
+            memcpy(b + i * 12, o, sizeof o);
+        }
+        return true;
+    }
+    if (frozen) {
+        for (int i = 0; i < n && i < CUFF_BONES; i++) a_mul(g_cuff_HD[(int)rel_side[i]], rel[i], b + i * 12);
+        return true;
+    }
+    {
+        extern int player_link_action(void);
+        calm = g_cuff_side_ok[0] && g_cuff_side_ok[1] && player_link_action() == 0 ? calm + 1 : 0;
+    }
+    const bool freeze_now = calm >= CUFF_FREEZE_DRAWS && n <= CUFF_BONES;
+    int kept = 0;
+    for (int i = 0; i < n; i++) {
+        float *m = b + i * 12;
+        float d2[2] = {1e30f, 1e30f};
+        for (int s = 0; s < 2; s++) {
+            if (!g_cuff_side_ok[s]) continue;
+            const float *h = g_hand_game[s];
+            const float dx = m[3] - h[3], dy = m[7] - h[7], dz = m[11] - h[11];
+            d2[s] = dx * dx + dy * dy + dz * dz;
+        }
+        if (d2[0] >= 1e30f && d2[1] >= 1e30f) continue;
+        const float dl = sqrtf(d2[0]), dr = sqrtf(d2[1]);
+        const bool idx_ok = i < CUFF_BONES;
+        if (idx_ok && g_cuff_side_ok[0] && g_cuff_side_ok[1]) {
+            if (dl < reach && dr > dl + CUFF_SIDE_MARGIN) arm[i] = 1;
+            else if (dr < reach && dl > dr + CUFF_SIDE_MARGIN) arm[i] = 2;
+        }
+        const bool learned = idx_ok && arm[i];
+        int side = learned ? arm[i] - 1 : (d2[1] < d2[0] ? 1 : 0);
+        if (!g_cuff_side_ok[side]) side = !side;
+        // (an arm not learned yet: its side of him, along the line from his left hand to his right as the game has them)
+        if (!learned && g_cuff_side_ok[0] && g_cuff_side_ok[1]) {
+            const float *l = g_hand_game[0], *r = g_hand_game[1];
+            const float a[3] = {r[3] - l[3], r[7] - l[7], r[11] - l[11]};
+            const float mid[3] = {(l[3] + r[3]) * 0.5f, (l[7] + r[7]) * 0.5f, (l[11] + r[11]) * 0.5f};
+            side = (m[3] - mid[0]) * a[0] + (m[7] - mid[1]) * a[1] + (m[11] - mid[2]) * a[2] > 0 ? 1 : 0;
+        }
+        if (log == 1) fprintf(stderr, "[cuff-log] bone %d: %.1f from the left hand, %.1f from the right (%s)\n", i, dl, dr,
+                              learned ? (arm[i] == 1 ? "left arm" : "right arm") : side ? "right side" : "left side");
+        // Every bone goes with its arm's hand: only the cuffs' vertices are drawn (CUFF_FIRST..), and they hang on the
+        // forearms and wrists - nothing else of the mesh is drawn to be collapsed.
+        if (freeze_now) a_mul(g_cuff_HI[side], m, rel[i]), rel_side[i] = (int8_t)side;  // (before m is changed)
+        float o[12];
+        a_mul(g_cuff_T[side], m, o);
+        memcpy(m, o, sizeof o);
+        kept += learned;
+    }
+    if (log == 1) fprintf(stderr, "[cuff-log] %d bones, %d learned as an arm's\n", n, kept), log = 2;
+    if (freeze_now) {
+        frozen = true;
+        fprintf(stderr, "[vr] first person: the cuffs are frozen behind the hands (%d bones, %d an arm's)\n", n, kept);
+    }
+    return true;
+}
+// (exec.c) The cuffs' vertices in the mesh's plain draw: its last CUFF_COUNT, from CUFF_FIRST (the model's own triangle
+// order - checked headset-free with SKYRECOMP_DRAW_RANGE=1662:1086-1661: his bare forearms gone, the cuffs left).
+bool vr_rig_cuff_range(uint32_t *first, uint32_t *count) {
+    if (!g_cuff_on) return false;
+    *first = CUFF_FIRST, *count = CUFF_VERTS;
+    return true;
+}
+
 // The Beetle on his right wrist (held, before a launch): three draws on one model matrix - the Beetle actor's (its
 // position +0x144) - rigid 330 indices (12288-byte vertex buffer), skinned 1464 (61440, 5 bones) and 96 (4096, 7
 // bones): the Beetle and the launcher it sits on. Measured headset-free with SKYRECOMP_HELD_NEAR=beetle (a test build:

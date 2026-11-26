@@ -949,6 +949,8 @@ static void tab_vr_options(void) {
                           "1st person: the game's own camera, hidden in the headset, is turned toward where you look, "
                           "so what the game does relative to it (sound, swimming, controls) matches your view. "
                           "Off: it stays behind Link.");
+    changed |= opt_toggle("Show Cuffs", &g_vr_config.show_cuffs, true,
+                          "1st person: Link's cuffs are drawn behind his hands on the controllers, held still there.");
     changed |= opt_slider("Camera Height", &g_vr_config.camera_height_offset, -50.0f, 50.0f, 5.0f, 0.0f, "%+g",
                           "Raises or lowers your viewpoint, in game units (about a centimetre each). In 1st person this "
                           "adjusts Link's eye height.");

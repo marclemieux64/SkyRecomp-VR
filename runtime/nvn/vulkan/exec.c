@@ -2806,6 +2806,8 @@ static uint64_t g_aim_main_frame[2] = {~0ull, ~0ull};
 static uint32_t g_aim_main_w[2];
 static float g_aim_vp[4];  // (eye 0's main view: its viewport, game units of its depth target)
 static int g_skin_bone_idx = -1;  // (the draw being set up is the Slingshot: its bones' uniform slot - vr_rig.c)
+static int g_cuff_bone_idx = -1;  // (the draw being set up is his bare skin, kept for the cuffs: its bones' slot)
+static uint32_t g_draw_sub_first, g_draw_sub_count;  // (this plain draw: only these vertices - his cuffs; 0: all)
 static bool aim_main_target(int eye) {
     NvnTexture *t = st.rt.depth;
     if (!t || eye < 0 || eye > 1) return false;
@@ -2965,6 +2967,12 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
             }
             return ubo_span(patched, size);
         }
+    }
+    if (stage == 0 && idx == g_cuff_bone_idx && size >= 48) {  // (his cuffs: wrist bones on the controllers - vr_rig.c)
+        extern bool vr_rig_cuff_bones(float *b, int n);
+        VkSpan s = vk_transient_copy((const void *)(uintptr_t)r.addr, size, 256);
+        const uint64_t bytes = r.size && r.size < size ? r.size : size;
+        if (vr_rig_cuff_bones(s.ptr, (int)(bytes / 48))) return ubo_span(s, size);
     }
     if (stage == 0 && idx == g_skin_bone_idx && size >= 48) {  // (the Slingshot's bones: moved with its hand - vr_rig.c)
         extern bool vr_rig_skin_transform(float T[12]);
@@ -4764,11 +4772,14 @@ static void draw_(CmdRec *r, bool indexed) {
         }
     }
     vr_rig_set_hand_draw(-1);
+    g_draw_sub_first = g_draw_sub_count = 0;  // (his cuffs: set below for that draw only)
     if (vr_stereo_active() && pr->vi) {
         // VR 1st person: Link's own skinned draws are skipped (both eyes), like the game's own 1st-person view.
         // Only a bone slot the vertex shader reads counts: bindings stay bound for later, unskinned draws.
         const Range cam = st.ubuf[0][0];
         bool link = false, skinned = false;
+        int link_idx = -1;
+        g_cuff_bone_idx = -1;
         for (int idx = 3; idx <= 5 && !link; idx++) {
             if (!(pr->vi->cbuf_mask & (1u << (idx + 3)))) continue;
             const Range bones = st.ubuf[0][idx];
@@ -4776,6 +4787,14 @@ static void draw_(CmdRec *r, bool indexed) {
             link = bones.addr && cam.addr &&
                    vr_rig_is_link_draw((const float *)(uintptr_t)cam.addr, cam.size, (const float *)(uintptr_t)bones.addr,
                                        bones.size, r->x[2], st.vbuf[0].addr, st.vbuf[0].size);
+            if (link) link_idx = idx;
+        }
+        {   // (VR Options > Show Cuffs: his arms' mesh kept, only its cuffs drawn, moved with the hands - vr_rig.c)
+            extern bool vr_rig_cuff_draw(uint64_t count);
+            extern bool vr_rig_cuff_range(uint32_t *first, uint32_t *count);
+            if (link && link_idx >= 0 && !indexed && vr_rig_cuff_draw(r->x[2]) &&
+                vr_rig_cuff_range(&g_draw_sub_first, &g_draw_sub_count))
+                link = false, g_cuff_bone_idx = link_idx;
         }
         // (rigid draws: his eyes - vr_rig_is_link_draw tells them by size and place)
         if (!skinned && cam.addr)
@@ -5459,7 +5478,16 @@ static void draw_(CmdRec *r, bool indexed) {
             VkDescriptorSet rset = stage_set(pr, pr->set_layout[1], 1, 1, pr->fi, rs0, rtint, 0, 0, 0, fii);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pr->layout, 1, 1, &rset, 0, NULL);
         }
-        if (!use_index) vkCmdDraw(cb, count, run_n[ri], first, base_inst + run_at[ri]);
+        uint32_t sub_first = 0, sub_count = count;
+        if (!use_index && g_draw_sub_count && g_draw_sub_first + g_draw_sub_count <= count)  // (his cuffs only - vr_rig.c)
+            sub_first = g_draw_sub_first, sub_count = g_draw_sub_count;
+        {   // (test) SKYRECOMP_DRAW_RANGE=<count>:<a>-<b>: plain draws of that many vertices draw only vertices a..b
+            static int have = -1;
+            static unsigned want, a, b;
+            if (have < 0) have = getenv("SKYRECOMP_DRAW_RANGE") && sscanf(getenv("SKYRECOMP_DRAW_RANGE"), "%u:%u-%u", &want, &a, &b) == 3;
+            if (have && !use_index && count == want && b < count && a <= b) sub_first = a, sub_count = b - a + 1;
+        }
+        if (!use_index) vkCmdDraw(cb, sub_count, run_n[ri], first + sub_first, base_inst + run_at[ri]);
         else vkCmdDrawIndexed(cb, icount, run_n[ri], 0, base_vertex, base_inst + run_at[ri]);
     }
     stat_draws++;
