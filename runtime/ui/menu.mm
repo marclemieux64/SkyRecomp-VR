@@ -798,6 +798,11 @@ static void tab_vr_options(void) {
                           "Resolution of each rendered eye relative to the size recommended by OpenXR. 1.0x is the "
                           "headset runtime's recommendation. Higher values look sharper but require substantially "
                           "more GPU performance. Changes apply live.");
+    changed |= opt_slider("Sharpness", &g_vr_config.sharpness, 0.0f, 1.0f, 0.05f, 0.0f, "%.2f",
+                          "Sharpens each eye's image (AMD FidelityFX RCAS), for a less blurry picture. 0: the default "
+                          "light sharpening only when VR Resolution is above or below the headset's size. Higher values "
+                          "sharpen more, at any VR Resolution; very high values can make edges shimmer. Changes apply "
+                          "live; not with Fast VR Post-Processing.");
     changed |= opt_toggle("Desktop Mirror", &g_vr_config.desktop_mirror, true,
                           "Shows the left eye in the desktop window. Turn this off to avoid the extra desktop "
                           "presentation and any desktop post-processing while keeping headset quality unchanged. "

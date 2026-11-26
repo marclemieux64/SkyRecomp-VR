@@ -34,6 +34,7 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **Recentred on the game's camera:** whenever 1st person switches to the game's camera (a cutscene, the Beetle, the boss lock), the view is recentred, so the shot starts in front of you whichever way you had turned.
 
 ### Rendering
+- **Sharpness** (VR Options, under VR Resolution): sharpens each eye's image with AMD FidelityFX RCAS, at any VR Resolution - including the headset's own size, where the eyes weren't sharpened at all. 0, the default, keeps the light sharpening as it was.
 - **Culling follows the headset:** objects are culled against the eyes' view, and their draw distance is measured along where you look.
 
 ### Packaging
