@@ -4072,35 +4072,45 @@ static bool hud_fullscreen_quad(void) {
 
 // The HUD texture's backend (NULL before the first HUD draw).
 TexBackend *vk_hud_backend(void) { return g_hud_tex.backend; }
-static bool g_wrist_drawn;  // a wrist element was drawn since the last present (device.c: else no card)
+static NvnTexture g_wrist_right_tex;  // (the right hand's card: the item slot and the shield gauge - vr.c)
+static bool g_wrist_drawn, g_wrist_right_drawn;  // an element of that card was drawn since the last present (device.c)
 TexBackend *vk_wrist_backend(void) { return g_wrist_drawn ? g_wrist_tex.backend : NULL; }
+TexBackend *vk_wrist_right_backend(void) { return g_wrist_right_drawn ? g_wrist_right_tex.backend : NULL; }
 
-// The wrist texture: made like the HUD texture (same size and format), cleared with it.
-static NvnTexture *wrist_texture(void) {
-    if (!g_wrist_tex.width && g_hud_tex.width) {
-        g_wrist_tex = g_hud_tex;
-        g_wrist_tex.backend = NULL;
-        snprintf(g_wrist_tex.label, sizeof g_wrist_tex.label, "vr-wrist");
+// The wrist textures: made like the HUD texture (same size and format, the elements at their layout places), cleared
+// with it. One per card: in the layout the shield gauge sits right under the hearts, inside the status card's rect.
+static NvnTexture *wrist_texture_of(NvnTexture *t, const char *label) {
+    if (!t->width && g_hud_tex.width) {
+        *t = g_hud_tex;
+        t->backend = NULL;
+        snprintf(t->label, sizeof t->label, "%s", label);
     }
-    return g_wrist_tex.width ? &g_wrist_tex : NULL;
+    return t->width ? t : NULL;
 }
-static void wrist_clear(VkCommandBuffer cb) {
-    if (!g_wrist_tex.backend) return;
-    TexBackend *w = vk_tex(&g_wrist_tex, true);
+static NvnTexture *wrist_texture(void) { return wrist_texture_of(&g_wrist_tex, "vr-wrist"); }
+static void wrist_clear_one(VkCommandBuffer cb, NvnTexture *t) {
+    if (!t->backend) return;
+    TexBackend *w = vk_tex(t, true);
     VkClearColorValue zero = {{0, 0, 0, 0}};
     VkImageSubresourceRange all = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, w->layer0, 1};
     vkCmdClearColorImage(cb, w->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
 }
+static void wrist_clear(VkCommandBuffer cb) { wrist_clear_one(cb, &g_wrist_tex), wrist_clear_one(cb, &g_wrist_right_tex); }
 
-// A 2D draw of a wrist panel's element (vr.c WRIST_*_RECT): its layout anchor - the draw's model translation in the
-// 1920x1080 layout - in the hearts' row (y < 100, x < 340; the area name's banner, also top left, is all below
-// y 106 there) or by the rupee counter and Fi's prompt (x < 160, y > 740). Measured in Link's room.
-static bool hud_wrist_element(void) {
+// A 2D draw of a wrist card's element (vr.c WRIST_*_RECT), by its layout anchor - the draw's model translation in the
+// 1920x1080 layout. 1, the status card: the hearts' row (y < 100, x < 340; the area name's banner, also top left, is
+// all below y 106 there) or by the rupee counter and Fi's prompt (x < 200, y > 740: the rupees' third digit is at
+// 168). 2, the item card: the shield gauge under the hearts (x < 110, y 120..200: measured 73..100, 129..149) and the
+// item slot with ZR Items and R Pouch (x > 1680, y < 430: measured 1708..1824, 119..386). Measured in Link's room and
+// the Earth Temple (SKYRECOMP_HUD_RECTS). 0: neither.
+static int hud_wrist_element(void) {
     const Range c0 = st.ubuf[0][0];
-    if (!c0.addr || c0.size != 192) return false;
+    if (!c0.addr || c0.size != 192) return 0;
     const float *f = (const float *)(uintptr_t)c0.addr;
     const float x = ((f[0] * f[19] + f[3]) * 0.5f + 0.5f) * 1920, y = (0.5f - (f[5] * f[23] + f[7]) * 0.5f) * 1080;
-    return (y < 100 && x < 340) || (x < 160 && y > 740);
+    if ((y < 100 && x < 340) || (x < 200 && y > 740)) return 1;
+    if ((x < 110 && y >= 120 && y < 200) || (x > 1680 && y < 430)) return 2;
+    return 0;
 }
 
 // The panel image is a per-present scratch surface, not retained UI state.  Clear it only after device.c has
@@ -4116,7 +4126,7 @@ void vk_hud_discard_after_present(void) {
     vk_full_barrier(cb);
     vkCmdClearColorImage(cb, b->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
     wrist_clear(cb);
-    g_wrist_drawn = false;
+    g_wrist_drawn = g_wrist_right_drawn = false;
     vk_full_barrier(cb);
     g_hud_cleared = ~0ull;
     st.rt_dirty = true;
@@ -4560,18 +4570,22 @@ static bool hud_route(Prog *pr, bool mv) {
         hud_clear_for_frame();
     }
     // (vr.c, the wrist panels on: their elements go whole to the wrist texture, the rest stays in the HUD's)
-    NvnTexture *wrist = vr_wrist_elements() && hud_wrist_element() ? wrist_texture() : NULL;
-    if (wrist && !wrist->backend) {
+    extern bool vr_wrist_right_elements(void);
+    const int card = vr_wrist_elements() ? hud_wrist_element() : 0;
+    NvnTexture *wrist = card == 1 ? wrist_texture()
+                        : card == 2 && vr_wrist_right_elements() ? wrist_texture_of(&g_wrist_right_tex, "vr-wrist-right")
+                                                                 : NULL;
+    if (wrist && !wrist->backend) {  // (first use: made and cleared - this one only, the other may hold this frame's)
         vk_tex(wrist, true);
         vk_end_pass();
-        wrist_clear(vk_cmd());
+        wrist_clear_one(vk_cmd(), wrist);
         vk_full_barrier(vk_cmd());
     }
     g_hud_saved_rt = st.rt;
     st.rt = (RtState){0};
     st.rt.ncolor = 1;
     st.rt.color[0] = wrist ? wrist : hud;
-    if (wrist) g_wrist_drawn = true;
+    if (wrist) *(wrist == &g_wrist_tex ? &g_wrist_drawn : &g_wrist_right_drawn) = true;
     st.rt.depth = hd;
     st.rt_dirty = true;
     g_hud_sub_from = g_menu_screen = g_hud_saved_rt.color[0];
@@ -4997,6 +5011,30 @@ static void draw_(CmdRec *r, bool indexed) {
         if (st.ubuf[0][5].addr) widescreen_scene_ubo((const float *)(uintptr_t)st.ubuf[0][5].addr, st.ubuf[0][5].size);
     }
     if (g_debug_frame) debug_draw(pr, r, indexed);
+    {   // (RE) SKYRECOMP_HUD_RECTS=<frame>,...: on those presented frames, each 2D draw (the 192-byte orthographic camera
+        // block) as its rectangle in the 1920x1080 layout, its anchor (vr.c's wrist groups go by it) and its first
+        // texture - to place the HUD's elements (take a shot on the same frame).
+        static const char *frames = (const char *)1;
+        if (frames == (const char *)1) frames = getenv("SKYRECOMP_HUD_RECTS");
+        const Range c0 = st.ubuf[0][0];
+        if (frames && c0.addr && c0.size == 192) {
+            char want[32];
+            snprintf(want, sizeof want, "%llu", (unsigned long long)renderer_present_count());
+            const char *p = strstr(frames, want);
+            const size_t wl = strlen(want);
+            if (p && (p == frames || p[-1] == ',') && (p[wl] == ',' || !p[wl])) {
+                const float *f = (const float *)(uintptr_t)c0.addr;
+                const float ax = ((f[0] * f[19] + f[3]) * 0.5f + 0.5f) * 1920, ay = (0.5f - (f[5] * f[23] + f[7]) * 0.5f) * 1080;
+                const float x0 = ((f[0] * f[19] + f[3]) * 0.5f + 0.5f) * 1920, x1 = ((f[0] * (f[16] + f[19]) + f[3]) * 0.5f + 0.5f) * 1920;
+                const float y0 = (0.5f - (f[5] * f[23] + f[7]) * 0.5f) * 1080, y1 = (0.5f - (f[5] * (f[21] + f[23]) + f[7]) * 0.5f) * 1080;
+                NvnTexture *t = pr->fi->ntex ? shader_texture_object(1, &pr->fi->tex[0]) : NULL;
+                const TexBackend *tb = t ? (const TexBackend *)t->backend : NULL;
+                LOG("[hud-rect] frame %s anchor %.0f %.0f rect %.0f..%.0f x %.0f..%.0f | tex %ux%u tp %d fs %016llx\n", want, ax, ay,
+                    fminf(x0, x1), fmaxf(x0, x1), fminf(y0, y1), fmaxf(y0, y1), t ? t->width : 0, t ? t->height : 0,
+                    tb ? tb->tp : 0, (unsigned long long)g_cur_fs_hash);
+            }
+        }
+    }
     if (ct_on()) ct_draw(pr, "draw");
     alias_draw_check();
     pass_sample_hazard(pr);
