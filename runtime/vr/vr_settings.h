@@ -63,6 +63,11 @@ typedef struct VRConfig {
         = true
 #endif
         ;
+    bool show_cuffs  // 1st person: his cuffs drawn behind the hands (vr_rig.c)
+#ifdef __cplusplus
+        = true
+#endif
+        ;
     int move_direction
 #ifdef __cplusplus
         = 0

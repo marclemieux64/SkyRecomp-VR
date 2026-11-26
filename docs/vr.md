@@ -200,6 +200,19 @@ doesn't move the view. Standing still (action 0, the left stick let go, nothing 
 you look, more than 10 degrees off: his rotation's y (`+0x13e`), set before his update (`hle/player.c`
 `player_face_view`; `SKYRECOMP_VR_FACE_LOG=1`). He can't face the view while moving - he runs where he faces.
 
+Show Cuffs (VR Options, on by default; `show_cuffs` in `[VR]`): his cuffs are part of his arms' mesh, a plain draw of
+1662 vertices hidden in 1st person with his body. In the game's own model (romfs `Object/NX/ObjectPack.arc.LZ` >
+`oarc/Alink.arc` > `g3d/model.brres`, MDL0 `al`, object `polygon0`, `al_arm_L__al_upother_m`: 554 triangles - upper
+arms, forearms, a collar piece and the cuffs) the cuffs are the last 192 triangles, all 56.5+ units out along an arm in
+the bind pose (the flare starts at 57, the wrist is at 73.2): vertices 1086..1661 of the game's draw, which keeps the
+model's triangle order (`SKYRECOMP_DRAW_RANGE=1662:1086-1661` headset-free: the forearms gone, the cuffs left). That
+draw is kept with only those vertices drawn (`exec.c`), and its bones moved with their arm's hand to its controller
+(`vr_rig.c` `vr_rig_cuff_bones`, T = Vg C K Hg^-1 as for the hands). Each bone's arm is learned once it is clearly by
+one hand (within 32 units, 15 further from the other) - by the nearer hand alone, a forearm bone went with the other
+controller whenever the game held his hands close. Frozen: once he has stood (action 0) for 30 draws, each bone's
+place on its hand (Hg^-1 B) is kept and drawn on the controller from then on - following his animated forearms, the
+cuffs bobbed while he moved. `SKYRECOMP_VR_CUFF_LOG=1`: the bones' arms, once.
+
 Cutscene Camera (VR Options, on by default; `cutscene_camera` in `[VR]`): a cutscene hands 1st person to the game's
 camera (theatre) and back. The sign is the letterbox bars (`exec.c` `hud_letterbox_bar`): the game draws both bars on
 every frame, folded to no height outside cutscenes, and slides them in to 0.13 of the screen (NDC) in one (measured at
