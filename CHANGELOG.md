@@ -31,6 +31,7 @@ Experimental SteamVR / OpenXR support (off by default; VR Options > Enable VR Mo
 - **Bombs:** a raised bomb gets the controller's real motion. The Skyward Strike assist, which holds a raised Joy-Con still and upright, now acts only with the sword out, so throws and rolls are told apart reliably, swings aren't ignored, and a throw from the Earth Temple's stone ball no longer blows up at once.
 - **No bombs or pouches taken for a sword or shield:** a new sword model is learned only while the sword is out, and a new shield only while it is raised. A bomb in his right hand had been learned as a sword, after which the real sword was left to the game; the Adventure Pouch had been learned as a shield, and was drawn on the left hand in its place now and then. Remove those lines (`0 168`, `1 348`) from `vr_held_models.txt` if you have them.
 - **Recentred on the game's camera:** whenever 1st person switches to the game's camera (a cutscene, the Beetle, the boss lock), the view is recentred, so the shot starts in front of you whichever way you had turned.
+- **Item card on the right wrist:** with the Wrist HUD on, a second card on the other hand (the right, unless swapped) holds the current item slot with its count, ZR Items and R Pouch, and the shield gauge, taken off the floating HUD. The status card on the left also keeps the rupee counter's third digit, which had stayed on the floating HUD.
 
 ### Rendering
 - **Culling follows the headset:** objects are culled against the eyes' view, and their draw distance is measured along where you look.

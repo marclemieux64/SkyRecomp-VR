@@ -1024,12 +1024,15 @@ void backend_present(NvnTexture *t) {
                         const float r2[4] = {pc[0], flip ? 1 - pc[1] - pc[3] : pc[1], pc[2], pc[3]};
                         vk_vr_panel_into_eye(vk_cmd(), img, fmt, w, h, (uint32_t)e, hb, m, r2, flip, op);
                     }
-                    // the wrist card: its backing, then its element groups from the wrist texture (vr.c, exec.c)
-                    extern TexBackend *vk_wrist_backend(void), *vk_solid_texture(const float rgba[4]);
-                    TexBackend *wb = vk_wrist_backend();
-                    for (int i = 0; wb && i < 3; i++) {
+                    // the wrist cards: each one's backing, then its element groups from its wrist texture (vr.c,
+                    // exec.c) - the status card (hearts, rupees), then the item card (item slot, shield gauge)
+                    extern TexBackend *vk_wrist_backend(void), *vk_wrist_right_backend(void), *vk_solid_texture(const float rgba[4]);
+                    for (int k = 0; k < 6; k++) {
+                        const int i = k % 3;
+                        TexBackend *wb = k < 3 ? vk_wrist_backend() : vk_wrist_right_backend();
+                        if (!wb) continue;
                         float wm[16], wr[4], backing;
-                        if (!vr_eye_wrist(e, i, wm, wr, &backing)) continue;
+                        if (!(k < 3 ? vr_eye_wrist(e, i, wm, wr, &backing) : vr_eye_wrist_right(e, i, wm, wr, &backing))) continue;
                         if (i == 0) {  // (the HUD copy's backing colour, premultiplied; skipped when transparent)
                             const float c[4] = {.022f * backing, .026f * backing, .039f * backing, backing};
                             if (backing > 0.001f)

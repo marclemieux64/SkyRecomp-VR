@@ -1967,11 +1967,11 @@ static bool wrist_hud_glanced(int hand, XrPosef panel) {
 // same list (vr_mirror_layers) - so whatever the headset shows, the mirror shows, without per-layer mirror code.
 // Built from what was acquired and copied this frame; vr_frame_end then drops any whose release failed.
 static struct {
-    bool built, proj, hud, menu, beam, use_wrist, panel_in_eyes, marker;
+    bool built, proj, hud, menu, beam, use_wrist, panel_in_eyes, marker, wrist_right_shown;
     uint32_t wrist_count;
     XrCompositionLayerProjectionView pv[2];
     XrCompositionLayerProjection layer;
-    XrCompositionLayerQuad quad, quad_full, menu_quad, beam_quad, wrist[2], fade_layer, marker_quad;
+    XrCompositionLayerQuad quad, quad_full, menu_quad, beam_quad, wrist[2], fade_layer, marker_quad, wrist_right;
 } fl;
 // The wrist panels' element groups in the 1920x1080 2D layout (exec.c routes their draws to the wrist texture;
 // measured in Link's room): the status group - the hearts (two rows when he has many) - and the item group - the
@@ -1984,6 +1984,16 @@ static struct {
 #define WRIST_CARD_H (150 + 320 + 2 * WRIST_CARD_MARGIN)
 static _Atomic bool g_wrist_elements;
 bool vr_wrist_elements(void) { return atomic_load(&g_wrist_elements); }  // (exec.c: route them to the wrist texture)
+// The item card, on the other hand (the right, unless swapped), from its own wrist texture (exec.c): the item slot -
+// the current item with its count, ZR Items, R Pouch (top right) - and the shield gauge (under the hearts). Measured
+// in the Earth Temple (SKYRECOMP_HUD_RECTS): the item slot's anchors 1708..1824 x 119..386, the gauge's 73..100 x
+// 129..149 (its icon from x 50, its bar to 245). The card: the item slot on the left, the gauge beside it, at the top.
+#define WRIST_RIGHT_ITEM_RECT 1690, 40, 220, 380
+#define WRIST_RIGHT_SHIELD_RECT 40, 100, 230, 90
+#define WRIST_RIGHT_CARD_W (WRIST_CARD_MARGIN + 220 + WRIST_CARD_MARGIN + 230 + WRIST_CARD_MARGIN)
+#define WRIST_RIGHT_CARD_H (WRIST_CARD_MARGIN + 380 + WRIST_CARD_MARGIN)
+static _Atomic bool g_wrist_right_elements;
+bool vr_wrist_right_elements(void) { return atomic_load(&g_wrist_right_elements); }  // (exec.c: route them there)
 
 static void build_layers(void) {
     if (fl.built) return;
@@ -2031,6 +2041,7 @@ static void build_layers(void) {
         .subImage = {.swapchain = marker_swapchain, .imageRect = {{0, 0}, {MARKER_PX, MARKER_PX}}, .imageArrayIndex = 0},
         .pose = fl.marker ? mp : (XrPosef){{0, 0, 0, 1}, {0, 0, 0}}, .size = {marker_size, marker_size}};
     fl.wrist_count = 0;
+    fl.wrist_right_shown = false;
     extern bool player_eye(float eye[3]);
     const bool gameplay = player_eye(NULL);  // false on boot, title, loading, and file-select screens
     extern bool vr_game_paused(void);  // (vr_controls.c: a menu pauses the game - its screens stay whole)
@@ -2059,6 +2070,17 @@ static void build_layers(void) {
                     .subImage = {.swapchain = hud_swapchain, .imageRect = {{0, 0}, {480, 480}}, .imageArrayIndex = 0},
                     .pose = panels[status_hand], .size = {s, s * WRIST_CARD_H / WRIST_CARD_W}};
             }
+            // the item card on the other hand (vr_eye_wrist_right): the same size per layout pixel as the status card
+            fl.wrist_right_shown = hud_grip_tracked[item_hand];
+            if (fl.wrist_right_shown) {
+                const float s = g_vr_hud_config.wrist_hud_size * WRIST_RIGHT_CARD_W / WRIST_CARD_W;
+                fl.wrist_right = (XrCompositionLayerQuad){
+                    .type = XR_TYPE_COMPOSITION_LAYER_QUAD, .space = local_space,
+                    .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+                    .eyeVisibility = XR_EYE_VISIBILITY_BOTH,
+                    .subImage = {.swapchain = hud_swapchain, .imageRect = {{0, 0}, {480, 480}}, .imageArrayIndex = 0},
+                    .pose = panels[item_hand], .size = {s, s * WRIST_RIGHT_CARD_H / WRIST_RIGHT_CARD_W}};
+            }
         } else {
             const XrPosef pose[2] = {panels[status_hand], panels[item_hand]};
             const bool shown[2] = {status_visible, hud_grip_tracked[item_hand]};
@@ -2079,6 +2101,7 @@ static void build_layers(void) {
         }
     }
     atomic_store(&g_wrist_elements, fl.use_wrist && !getenv("SKYRECOMP_VR_PANEL_QUAD"));
+    atomic_store(&g_wrist_right_elements, fl.use_wrist && !getenv("SKYRECOMP_VR_PANEL_QUAD"));
     // Use the overlay path for the final veil, just like the HUD/keyboard it must cover. A second scene
     // projection layer is not sufficient to keep the veil in front of SteamVR's separately composed overlays.
     // Head-locked and close to the eyes, with far more angular coverage than the headset FOV: no visible edges.
@@ -2155,6 +2178,33 @@ bool vr_eye_wrist(int eye, int piece, float mvp[16], float rect[4], float *backi
     // its quad in the card's -1..1 (+y up): card * S
     const float sx = pw / WRIST_CARD_W, sy = ph / WRIST_CARD_H;
     const float cx = 2 * px / WRIST_CARD_W - 1 + sx, cy = 1 - 2 * py / WRIST_CARD_H - sy;
+    for (int r = 0; r < 4; r++) {
+        mvp[0 * 4 + r] = card[0 * 4 + r] * sx;
+        mvp[1 * 4 + r] = card[1 * 4 + r] * sy;
+        mvp[2 * 4 + r] = card[2 * 4 + r];
+        mvp[3 * 4 + r] = card[0 * 4 + r] * cx + card[1 * 4 + r] * cy + card[3 * 4 + r];
+    }
+    return true;
+}
+
+// (device.c) The item card's piece `piece` (vr_eye_wrist's, from the right wrist texture): 0 its backing, 1 the item
+// slot, 2 the shield gauge.
+bool vr_eye_wrist_right(int eye, int piece, float mvp[16], float rect[4], float *backing) {
+    float card[16];
+    if (eye < 0 || eye > 1 || piece < 0 || piece > 2 || !fl.built || !fl.panel_in_eyes || !fl.use_wrist ||
+        !fl.wrist_right_shown || getenv("SKYRECOMP_VR_PANEL_QUAD") || !layer_quad_mvp_eye(eye, &fl.wrist_right, false, card))
+        return false;
+    *backing = g_vr_hud_config.wrist_hud_background;
+    static const int groups[2][4] = {{WRIST_RIGHT_ITEM_RECT}, {WRIST_RIGHT_SHIELD_RECT}};
+    float px = 0, py = 0, pw = WRIST_RIGHT_CARD_W, ph = WRIST_RIGHT_CARD_H;
+    if (piece) {
+        const int *g = groups[piece - 1];
+        px = piece == 1 ? WRIST_CARD_MARGIN : WRIST_CARD_MARGIN + 220 + WRIST_CARD_MARGIN, py = WRIST_CARD_MARGIN;
+        pw = (float)g[2], ph = (float)g[3];
+        for (int k = 0; k < 4; k++) rect[k] = (float)g[k] / (k & 1 ? HUD_H : HUD_W);
+    } else rect[0] = rect[1] = 0, rect[2] = rect[3] = 1;
+    const float sx = pw / WRIST_RIGHT_CARD_W, sy = ph / WRIST_RIGHT_CARD_H;
+    const float cx = 2 * px / WRIST_RIGHT_CARD_W - 1 + sx, cy = 1 - 2 * py / WRIST_RIGHT_CARD_H - sy;
     for (int r = 0; r < 4; r++) {
         mvp[0 * 4 + r] = card[0 * 4 + r] * sx;
         mvp[1 * 4 + r] = card[1 * 4 + r] * sy;
@@ -2375,7 +2425,12 @@ bool vr_eye_wrist(int eye, int piece, float mvp[16], float rect[4], float *backi
     (void)eye; (void)piece; (void)mvp; (void)rect; (void)backing;
     return false;
 }
+bool vr_eye_wrist_right(int eye, int piece, float mvp[16], float rect[4], float *backing) {
+    (void)eye; (void)piece; (void)mvp; (void)rect; (void)backing;
+    return false;
+}
 bool vr_wrist_elements(void) { return false; }
+bool vr_wrist_right_elements(void) { return false; }
 bool vr_eye_panel(int eye, void **image, uint32_t *width, uint32_t *height, uint32_t *format, float mvp[16],
                   float rect[4], bool *opaque, float cut[2]) {
     (void)eye; (void)image; (void)width; (void)height; (void)format; (void)mvp; (void)rect; (void)opaque; (void)cut;

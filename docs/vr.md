@@ -29,6 +29,13 @@ the reset. No captured menu image is substituted for the live layouts.
 On Windows, runtime logs are formatted before writing to unbuffered stderr, so routine VR diagnostics issue
 one write per message instead of many small writes on the render thread.
 
+Wrist HUD cards (drawn into the eyes): 2D HUD draws are sorted by their layout anchor (the draw's model translation
+in the 1920x1080 layout, `exec.c` `hud_wrist_element`) into two wrist textures. The status card, on the left hand:
+the hearts' row (y < 100, x < 340), the rupees and Fi's prompt (x < 200, y > 740). The item card, on the other hand
+(`vr.c` `vr_eye_wrist_right`): the shield gauge (x < 110, y 120..200) and the item slot with ZR Items and R Pouch
+(x > 1680, y < 430). Each card has its own texture because the gauge sits inside the status card's rect in the
+layout. Measured with `SKYRECOMP_HUD_RECTS=<frame>,...` (each 2D draw's anchor and first texture on those frames).
+
 Standard solid-colour game fades use a final head-locked OpenXR quad overlay covering the headset view, including
 the floating HUD, wrist panels, keyboard and pointer. The renderer reads the game's actual uniform RGBA and
 projects its four vertices to identify a full-view fade; overlapping fades retain their alpha blending order.
