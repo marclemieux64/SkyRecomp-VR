@@ -979,9 +979,12 @@ static void tab_vr_options(void) {
                           "doesn't.");
     changed |= opt_toggle("Physical Sheathing", &g_vr_config.physical_sheathing, false,
                           "1st person: reach over your right shoulder and squeeze the right grip to draw the sword; it stays "
-                          "out while you hold the grip and is put away when you let go. A swing no longer draws it. Like "
+                          "out until you reach back over your shoulder and squeeze again. A swing no longer draws it. Like "
                           "Physical Climbing, it frees the grips: they no longer press L / R (hold a stick click while "
                           "squeezing a grip for them), the left grip raises the shield and a flick of the left hand doesn't.");
+    changed |= opt_toggle("Hold Grip to Keep Sword Out", &g_vr_config.sheath_hold_grip, false,
+                          "With Physical Sheathing: the sword stays out only while you hold the right grip, and is put "
+                          "away when you let go.");
 
     opt_end();
 

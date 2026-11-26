@@ -301,8 +301,9 @@ static void climb_update(SkyVrControllers *s) {
 // at most SHEATH_FWD in front, SHEATH_UP_LO..SHEATH_UP_HI up, SHEATH_SIDE_LO..SHEATH_SIDE_HI to the right; a little
 // more to leave it - squeezing the right grip while the sword is sheathed (vr_sword_sheathed, hle/vr_sword.c) draws it:
 // a swing of the right Joy-Con for SHEATH_SWING_NS (vr_input_draw_swing: the game draws its sword when the Joy-Con is
-// swung), a strong buzz. The sword stays out only while the grip is held: letting go anywhere puts it away - B for
-// SHEATH_B_NS (the game's Put Away), a lighter buzz (below). Not while he climbs.
+// swung), a strong buzz. It stays out until the grip is squeezed over the shoulder again - B for SHEATH_B_NS (the
+// game's Put Away), a lighter buzz; with Hold Grip to Keep Sword Out, only while the grip is held: letting go anywhere
+// puts it away (below). Not while he climbs.
 // Log: [sheath] lines.
 #define SHEATH_FWD 0.10f
 #define SHEATH_UP_LO -0.30f
@@ -312,6 +313,7 @@ static void climb_update(SkyVrControllers *s) {
 #define SHEATH_MARGIN 0.08f
 #define SHEATH_SWING_NS 150000000ull
 #define SHEATH_B_NS 150000000ull
+#define SHEATH_PUT_AWAY_NS 1500000000ull
 static _Atomic uint64_t g_draw_swing_until;
 // The right hand's height below the eyes (metres, NAN: not tracked) - vr_controls.c, bombs
 static _Atomic float g_right_hand_drop = NAN;
@@ -399,10 +401,28 @@ static void sheath_update(SkyVrControllers *s) {
     // the shoulder, or swung out holding it), letting go anywhere puts it away - B again every SHEATH_B_NS until the
     // game has it sheathed (a release during the draw's animation waits for it). Not in a spin attack or while dowsing:
     // the game holds the sword up for those.
+    // VR Options > Hold Grip to Keep Sword Out, off by default: holding the grip the whole time tired the hand (issue
+    // #28) - the sword stays out once drawn, and a squeeze back over the shoulder puts it away (B as above, until the
+    // game has it sheathed, for SHEATH_PUT_AWAY_NS at most).
     static bool gripped;  // (the sword out under the grip)
+    static uint64_t retry_at;  // (B held for SHEATH_B_NS, then a gap as long, so the game sees each press)
+    if (!g_vr_config.sheath_hold_grip) {
+        static uint64_t put_away_until;
+        gripped = false;
+        if (press && in_zone && sheathed == 0) {
+            put_away_until = now + SHEATH_PUT_AWAY_NS, retry_at = 0;
+            haptic(1, 0.5f, 30);
+            LOG("[sheath] squeezed over the shoulder with the sword out: put away\n");
+        }
+        if (sheathed != 0) put_away_until = 0;
+        if (now < put_away_until && now >= retry_at && !vr_sword_spin() && !vr_dowse_active()) {
+            b_until = now + SHEATH_B_NS, retry_at = now + SHEATH_B_NS * 2;
+            s->buttons |= SKY_JC_B;
+        }
+        return;
+    }
     if (sheathed == 1) gripped = false;
     else if (sheathed == 0 && held) gripped = true;
-    static uint64_t retry_at;  // (B held for SHEATH_B_NS, then a gap as long, so the game sees each press)
     if (gripped && !held && sheathed == 0 && now >= retry_at && !vr_sword_spin() && !vr_dowse_active()) {
         b_until = now + SHEATH_B_NS, retry_at = now + SHEATH_B_NS * 2;
         s->buttons |= SKY_JC_B;

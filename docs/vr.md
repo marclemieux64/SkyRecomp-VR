@@ -489,9 +489,11 @@ backflip when targeting takes it further - switched off altogether, those left t
   eyes), at most 0.10 m in front, -0.30..0.30 m up, -0.05..0.40 m to the right, 0.08 m more to leave - with a light tick
   on reaching it. Squeezing the right grip there while the sword is sheathed (`vr_sword_sheathed`) draws it: the
   right Joy-Con is swung for 150 ms (`vr_input_draw_swing`, read in `vr_controls.c`: 3 rev/s about x, 3 g), as the game
-  draws its sword when the Joy-Con is swung. It stays out only while the grip is held: once it is out under the grip,
-  letting go anywhere puts it away - B for 150 ms (the game's Put Away), again every 300 ms until the game has it
-  sheathed; not in a spin attack or while dowsing. A swing doesn't draw it: while it is sheathed and Link has nothing
+  draws its sword when the Joy-Con is swung. It stays out until the grip is squeezed over the shoulder again (issue
+  #28: holding the grip the whole time tired the hand) - B for 150 ms (the game's Put Away), again every 300 ms until
+  the game has it sheathed, for 1.5 s at most. With Hold Grip to Keep Sword Out (`sheath_hold_grip`, default off) it
+  stays out only while the grip is held: once it is out under the grip, letting go anywhere puts it away, the same
+  way. Not in a spin attack or while dowsing. A swing doesn't draw it: while it is sheathed and Link has nothing
   in use (`player_bare_on_foot`, `player.c`: none of the use-item, hanging, water, climbing, crawling or rope flags;
   not in the sky), the right Joy-Con is held still (gravity only, its pointing kept). Not while climbing. Log:
   `[sheath]`. Tested in VR.
