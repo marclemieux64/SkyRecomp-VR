@@ -307,6 +307,15 @@ static void skyward_strike_assist(SkyJoyConSensor *s) {
 #define BOMB_SETTLE_NS 400000000ull
 #define BOMB_HELD_NS 12000000000ull
 static bool g_bomb_sword_pull;  // (the sword came out with a bomb in hand: the log's motion dump - vr_joycon_sensor)
+// A bomb in hand, thrown with the right trigger (vr_input.c): the game sees the right Joy-Con held still - no swing of
+// the arm can draw the sword and drop the bomb (early explosions, user 2026-11-26) - and the trigger plays it a throw
+// or a roll made in VR and accepted by the game (bomb_throw_play), by the hand's height as with a swing.
+static _Atomic bool g_bomb_held;
+static _Atomic uint64_t g_bomb_throw_at;  // (when the trigger asked for a throw; 0: none)
+bool vr_bomb_held(void);
+bool vr_bomb_held(void) { return atomic_load(&g_bomb_held); }
+void vr_bomb_throw_request(void);
+void vr_bomb_throw_request(void) { atomic_store(&g_bomb_throw_at, SDL_GetTicksNS()); }
 static void bomb_gesture(SkyJoyConSensor *s) {
     static int raw = -1, log = -1;
     if (raw < 0) raw = getenv("SKYRECOMP_VR_BOMB_RAW") != NULL;
@@ -320,21 +329,32 @@ static void bomb_gesture(SkyJoyConSensor *s) {
     const int action = player_link_action();
     const uint64_t now = SDL_GetTicksNS();
     const float g = sqrtf(s->gyro[0] * s->gyro[0] + s->gyro[1] * s->gyro[1] + s->gyro[2] * s->gyro[2]);
-    if (action == 0x43 && !held) held = true, thrown = false, held_since = now;
+    // (from taking one out - 0x3f, then 0x40, 0x43 - or the raised stance; a new one taken out starts afresh)
+    static int last_action = -1;
+    if ((action == 0x3f && last_action != 0x3f) || (action == 0x43 && !held)) {
+        held = true, thrown = false, held_since = now;
+        if (log) LOG("[bomb] in hand (action %#x)\n", action);
+    }
+    last_action = action;
     if (held) {
         const char *why = NULL;
         if (action == 0x41) thrown = true;
         else if (thrown) why = "thrown";
         if (action == 0x42 || action == 0x44) why = "put away";
         if (action == 0x36 || action == 0x37) why = "hurt";
-        // (the sword's state settles over 10 updates - hle/vr_sword.c: not in the first half second, while it's put away)
-        if (vr_sword_sheathed() == 0 && now - held_since > 500000000ull) why = "the sword came out", g_bomb_sword_pull = true;
+        // (the sword drawn - hle/vr_sword.c, by its line - isn't a reason: with a bomb in hand it read drawn now and then,
+        // and the bomb was let go of early - user's log 2026-11-26. Logged for the dump only.)
+        static bool was_drawn;
+        const bool drawn = vr_sword_sheathed() == 0 && now - held_since > 500000000ull;
+        if (drawn && !was_drawn) g_bomb_sword_pull = true;
+        was_drawn = drawn;
         if (now - held_since > BOMB_HELD_NS) why = "held too long";
         if (why) {
             held = active = frozen = false;
             if (log) LOG("[bomb] no longer in hand: %s (action %#x)\n", why, action);
         }
     }
+    atomic_store(&g_bomb_held, held && !raw && vr_running() && g_vr_config.view_mode == 1 && action != 0x41);
     if (raw || !vr_running() || g_vr_config.view_mode != 1 || !held) {
         active = frozen = false;
         return;
@@ -375,6 +395,135 @@ static void bomb_gesture(SkyJoyConSensor *s) {
     for (int i = 0; i < 3; i++) s->accel[i] += down_new[i] - down_old[i];  // (accel = down - motion: the motion kept)
 }
 
+// The throw and the roll the right trigger plays: the last ~100 ms of motion before the game took a real one in VR as
+// a throw (overhand) or a roll (underhand) - SKYRECOMP_BOMB_LOG dumps #10 and #16, 2026-11-25, all five of each kind
+// taken as meant. Each sample: ms before the throw, gyro (rev/s), accel (g), the Joy-Con's y and z axes in the player's
+// frame (x is y x z).
+typedef struct { float ms, g[3], a[3], y[3], z[3]; } BombSample;
+static const BombSample k_overhand[] = {
+    {101, {0.37f, -0.14f, 0.00f}, {-0.03f, -0.68f, 0.11f}, {-0.26f, -0.37f, 0.89f}, {-0.55f, -0.70f, -0.45f}},
+    {93, {0.53f, -0.15f, 0.06f}, {-0.02f, -0.55f, 0.06f}, {-0.27f, -0.42f, 0.86f}, {-0.57f, -0.66f, -0.50f}},
+    {85, {0.73f, -0.15f, 0.09f}, {-0.03f, -0.31f, 0.06f}, {-0.30f, -0.49f, 0.82f}, {-0.57f, -0.59f, -0.56f}},
+    {76, {0.99f, -0.19f, 0.06f}, {-0.08f, 0.13f, 0.10f}, {-0.33f, -0.58f, 0.74f}, {-0.56f, -0.52f, -0.65f}},
+    {68, {1.32f, -0.27f, 0.02f}, {-0.23f, 0.92f, 0.22f}, {-0.37f, -0.69f, 0.62f}, {-0.50f, -0.41f, -0.76f}},
+    {59, {1.50f, -0.42f, -0.01f}, {-0.17f, 2.35f, 1.61f}, {-0.39f, -0.77f, 0.50f}, {-0.41f, -0.34f, -0.85f}},
+    {52, {0.98f, -0.38f, -0.10f}, {0.90f, 1.74f, 5.60f}, {-0.40f, -0.72f, 0.56f}, {-0.40f, -0.42f, -0.82f}},
+    {43, {0.00f, 0.11f, 0.03f}, {2.95f, -1.80f, 8.00f}, {-0.34f, -0.53f, 0.78f}, {-0.54f, -0.57f, -0.62f}},
+    {34, {-0.78f, 0.38f, 0.90f}, {4.42f, -5.52f, 8.00f}, {-0.14f, -0.27f, 0.95f}, {-0.72f, -0.64f, -0.28f}},
+    {27, {-1.35f, 0.16f, 1.52f}, {3.95f, -6.71f, 8.00f}, {0.07f, -0.01f, 1.00f}, {-0.76f, -0.64f, 0.04f}},
+    {19, {-1.95f, -0.04f, 1.46f}, {2.33f, -5.84f, 6.78f}, {0.20f, 0.20f, 0.96f}, {-0.69f, -0.66f, 0.29f}},
+    {10, {-2.64f, 0.51f, 0.93f}, {1.36f, -4.61f, 5.91f}, {0.22f, 0.47f, 0.86f}, {-0.54f, -0.68f, 0.50f}},
+    {0, {-3.01f, 1.30f, 0.81f}, {1.20f, -2.79f, 4.52f}, {0.19f, 0.72f, 0.66f}, {-0.38f, -0.57f, 0.73f}},
+};
+static const BombSample k_underhand[] = {
+    {99, {-0.05f, -0.22f, -0.14f}, {0.00f, 1.02f, -0.82f}, {-0.12f, -0.29f, -0.95f}, {0.66f, 0.69f, -0.29f}},
+    {91, {0.01f, -0.18f, -0.07f}, {-0.36f, 1.03f, -1.45f}, {-0.10f, -0.27f, -0.96f}, {0.67f, 0.69f, -0.27f}},
+    {82, {0.08f, -0.10f, 0.00f}, {-0.74f, 1.03f, -2.05f}, {-0.07f, -0.27f, -0.96f}, {0.68f, 0.69f, -0.24f}},
+    {74, {0.15f, 0.18f, 0.06f}, {-1.54f, 1.16f, -3.25f}, {0.02f, -0.29f, -0.96f}, {0.67f, 0.71f, -0.20f}},
+    {65, {0.28f, 0.40f, 0.04f}, {-1.50f, 1.36f, -4.09f}, {0.11f, -0.28f, -0.95f}, {0.66f, 0.74f, -0.14f}},
+    {57, {0.55f, 0.46f, -0.05f}, {-0.78f, 1.53f, -5.36f}, {0.19f, -0.20f, -0.96f}, {0.63f, 0.78f, -0.04f}},
+    {50, {0.92f, 0.47f, -0.16f}, {-0.17f, 1.35f, -6.93f}, {0.28f, -0.07f, -0.96f}, {0.58f, 0.81f, 0.10f}},
+    {41, {1.45f, 0.50f, -0.17f}, {0.34f, 0.68f, -8.00f}, {0.39f, 0.11f, -0.91f}, {0.52f, 0.79f, 0.32f}},
+    {33, {1.69f, 0.55f, 0.02f}, {0.58f, 0.38f, -8.00f}, {0.47f, 0.24f, -0.85f}, {0.49f, 0.73f, 0.48f}},
+    {23, {1.87f, 0.79f, 0.58f}, {1.42f, 0.22f, -8.00f}, {0.56f, 0.36f, -0.75f}, {0.49f, 0.58f, 0.65f}},
+    {15, {1.92f, 0.99f, 0.89f}, {1.85f, 0.42f, -8.00f}, {0.63f, 0.46f, -0.63f}, {0.47f, 0.43f, 0.77f}},
+    {3, {2.04f, 0.99f, 0.93f}, {2.20f, 0.89f, -8.00f}, {0.66f, 0.55f, -0.51f}, {0.40f, 0.32f, 0.86f}},
+    {0, {2.31f, 0.78f, 0.64f}, {2.11f, 1.32f, -8.00f}, {0.68f, 0.64f, -0.36f}, {0.26f, 0.25f, 0.93f}},
+};
+#define BOMB_THROW_TAIL_NS 250000000ull  // (after the recording: its last pose, still, for the game to finish the throw)
+// With a bomb in hand: the trigger's throw while it plays, else the Joy-Con held still. True: s was set here.
+// The game throws (or rolls) only from its "raised" stance, action 0x43, which it takes when the Joy-Con is held up (or
+// down) with a bomb in hand; a swing from just holding it (action 0) draws the sword instead and the bomb drops - the
+// early explosions (user's log 2026-11-26: every trigger throw from 0x43 threw, the one from 0 drew the sword). So the
+// trigger first holds the recording's wound-up pose until the game is in 0x43 (BOMB_ARM_MIN_NS at least, BOMB_ARM_MAX_NS
+// at most), then plays it.
+#define BOMB_ARM_MIN_NS 60000000ull
+#define BOMB_ARM_MAX_NS 800000000ull
+static void bomb_pose(SkyJoyConSensor *s, const BombSample *p, bool moving) {
+    for (int c = 0; c < 3; c++) {
+        s->gyro[c] = moving ? p->g[c] : 0.0f;
+        s->direction[3 + c] = p->y[c], s->direction[6 + c] = p->z[c];
+    }
+    s->direction[0] = p->y[1] * p->z[2] - p->y[2] * p->z[1];
+    s->direction[1] = p->y[2] * p->z[0] - p->y[0] * p->z[2];
+    s->direction[2] = p->y[0] * p->z[1] - p->y[1] * p->z[0];
+    for (int c = 0; c < 3; c++) s->accel[c] = moving ? p->a[c] : -s->direction[c * 3 + 2];
+}
+static bool bomb_throw_play(SkyJoyConSensor *s) {
+    static uint64_t asked_seen, arm_from, playing_from;
+    static bool over, arming;
+    static int log = -1;
+    if (log < 0) log = getenv("SKYRECOMP_BOMB_LOG") != NULL;
+    extern int player_link_action(void);
+    const uint64_t asked = atomic_load(&g_bomb_throw_at), now = SDL_GetTicksNS();
+    if (asked && asked != asked_seen) {
+        extern float vr_input_right_hand_drop(void);
+        const float drop = vr_input_right_hand_drop();
+        asked_seen = asked, over = !isfinite(drop) || drop < BOMB_OVERHAND_DROP;
+        arming = true, arm_from = now, playing_from = 0;
+        if (log) LOG("[bomb] trigger: %s (hand %.2f m below the eyes)\n", over ? "a throw" : "a roll", drop);
+    }
+    const BombSample *k = over ? k_overhand : k_underhand;
+    const int n = over ? (int)(sizeof k_overhand / sizeof k_overhand[0]) : (int)(sizeof k_underhand / sizeof k_underhand[0]);
+    if (arming) {
+        const int action = player_link_action();
+        if (action == 0x43 && now >= arm_from + BOMB_ARM_MIN_NS) {
+            arming = false, playing_from = now;
+            if (log) LOG("[bomb] raised (%.0f ms): playing the %s\n", (double)(now - arm_from) / 1e6, over ? "throw" : "roll");
+        } else if (now >= arm_from + BOMB_ARM_MAX_NS) {
+            arming = false;
+            if (log) LOG("[bomb] the game didn't raise the bomb (action %#x): no throw\n", action);
+        } else {
+            bomb_pose(s, &k[0], false);  // (wound up, held still)
+            return true;
+        }
+    }
+    const float span = k[0].ms;
+    const float el = playing_from ? (float)((double)(now - playing_from) / 1e6) : 1e9f;
+    if (el <= span + (float)(BOMB_THROW_TAIL_NS / 1000000ull)) {
+        int i = 0;
+        while (i < n - 1 && span - k[i + 1].ms <= el) i++;
+        bomb_pose(s, &k[i], el <= span);
+        return true;
+    }
+    if (!atomic_load(&g_bomb_held)) return false;
+    for (int c = 0; c < 3; c++) s->gyro[c] = 0, s->accel[c] = -s->direction[c * 3 + 2];  // (held still)
+    return true;
+}
+
+// A cooldown after a bomb throw: the arm's follow-through after the bomb left the hand was taken as another swing,
+// and bombs went off early (user 2026-11-26). From BOMB_COOLDOWN_DELAY_NS after a throw or roll starts (action 0x41 -
+// the throw itself reads the swing until then) until BOMB_COOLDOWN_NS after it ends, the game sees the right Joy-Con
+// held still where it points: no turning, gravity only. SKYRECOMP_VR_BOMB_COOLDOWN_MS: the time after (0: off).
+#define BOMB_COOLDOWN_DELAY_NS 150000000ull
+#define BOMB_COOLDOWN_NS 800000000ull
+static void bomb_cooldown(SkyJoyConSensor *s) {
+    static long after_ms = -2;
+    if (after_ms == -2) after_ms = getenv("SKYRECOMP_VR_BOMB_COOLDOWN_MS") ? atol(getenv("SKYRECOMP_VR_BOMB_COOLDOWN_MS"))
+                                                                          : (long)(BOMB_COOLDOWN_NS / 1000000ull);
+    extern int player_link_action(void);
+    extern bool vr_running(void);
+    static uint64_t throw_start, throw_end;
+    static bool throwing;
+    const uint64_t now = SDL_GetTicksNS();
+    const bool t = player_link_action() == 0x41;
+    if (t && !throwing) throw_start = now;
+    if (throwing) throw_end = now;  // (the last moment of the throw seen)
+    throwing = t;
+    if (after_ms <= 0 || !vr_running() || g_vr_config.view_mode != 1 || !throw_start) return;
+    const bool still = (throwing && now >= throw_start + BOMB_COOLDOWN_DELAY_NS) ||
+                       (!throwing && throw_end >= throw_start && now < throw_end + (uint64_t)after_ms * 1000000ull);
+    if (!still) return;
+    for (int i = 0; i < 3; i++) s->gyro[i] = 0, s->accel[i] = -s->direction[i * 3 + 2];
+    static uint64_t said_for;
+    if (said_for != throw_start) {
+        said_for = throw_start;
+        static int log = -1;
+        if (log < 0) log = getenv("SKYRECOMP_BOMB_LOG") != NULL;
+        if (log) LOG("[bomb] thrown: the controller held still for the follow-through\n");
+    }
+}
+
 bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
     SkyJoyConSensor s;
     extern bool motion_joycon_mode(void);
@@ -396,7 +545,11 @@ bool vr_joycon_sensor(int device, VrJoyConSensor *sensor) {
             if (!said++) LOG("[vr] physical sheathing: a swing of the right controller doesn't draw the sword\n");
         }
         skyward_strike_assist(&s);
+    }
+    if (device == 1) {  // (bombs: every frame - also while a reticle or the menu pointer has the Joy-Con)
         bomb_gesture(&s);  // (a bomb held: thrown or rolled by where the hand is)
+        if (!bomb_throw_play(&s))  // (a bomb held: still, thrown with the trigger)
+            bomb_cooldown(&s);     // (just after a throw: the follow-through isn't another swing)
     }
     {   // (physical sheathing, vr_input.c: a grab over the shoulder draws the sword with a swing of the Joy-Con)
         extern bool vr_input_draw_swing(float gyro[3], float accel[3]);

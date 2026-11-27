@@ -617,6 +617,22 @@ void vr_input_sync(XrSpace space, XrTime time, const float reference[7]) {
         }
         s.zl = get_float(ACT_ZL);
         s.zr = get_float(ACT_ZR);
+        {   // (a bomb in hand: the right trigger throws it - vr_controls.c bomb_throw_play - instead of opening the items)
+            extern bool vr_bomb_held(void);
+            extern void vr_bomb_throw_request(void);
+            static bool was;
+            const bool pulled = s.zr > 0.6f, held = vr_bomb_held();
+            if (pulled && !was) {
+                static int log = -1;
+                if (log < 0) log = getenv("SKYRECOMP_BOMB_LOG") != NULL;
+                if (log) LOG("[bomb] right trigger pulled (%s)\n", held ? "a bomb in hand: a throw" : "no bomb in hand");
+            }
+            if (held) {
+                if (pulled && !was) vr_bomb_throw_request();
+                s.zr = 0;
+            }
+            was = pulled;
+        }
         s.l = get_float(ACT_L);
         s.r = get_float(ACT_R);
         g_grip[0] = s.l, g_grip[1] = s.r;
